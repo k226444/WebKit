@@ -303,6 +303,8 @@ constexpr size_t typeKindSizeInBytes(TypeKind kind)
     case TypeKind::Eqref:
     case TypeKind::Anyref:
     case TypeKind::Nullref:
+    case TypeKind::Nullfuncref:
+    case TypeKind::Nullexternref:
     case TypeKind::I31ref: {
         break;
     }
@@ -863,7 +865,7 @@ public:
 
     static const TypeDefinition& signatureForLLIntBuiltin(LLIntBuiltin);
 
-    static RefPtr<TypeDefinition> typeDefinitionForFunction(const Vector<Type, 1>& returnTypes, const Vector<Type>& argumentTypes);
+    static RefPtr<TypeDefinition> typeDefinitionForFunction(const Vector<Type, 16>& returnTypes, const Vector<Type, 16>& argumentTypes);
     static RefPtr<TypeDefinition> typeDefinitionForStruct(const Vector<FieldType>& fields);
     static RefPtr<TypeDefinition> typeDefinitionForArray(FieldType);
     static RefPtr<TypeDefinition> typeDefinitionForRecursionGroup(const Vector<TypeIndex>& types);

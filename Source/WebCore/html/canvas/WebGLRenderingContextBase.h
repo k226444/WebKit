@@ -28,6 +28,7 @@
 #if ENABLE(WEBGL)
 
 #include "ActivityStateChangeObserver.h"
+#include "EventLoop.h"
 #include "ExceptionOr.h"
 #include "GPUBasedCanvasRenderingContext.h"
 #include "GraphicsContextGL.h"
@@ -155,8 +156,6 @@ using WebGLCanvas = std::variant<RefPtr<HTMLCanvasElement>>;
 #if ENABLE(MEDIA_STREAM)
 class VideoFrame;
 #endif
-
-using EventLoopTimerPtr = uintptr_t;
 
 class InspectorScopedShaderProgramHighlight {
 public:
@@ -505,7 +504,7 @@ public:
     const PixelStoreParameters& unpackPixelStoreParameters() const { return m_unpackParameters; };
 
 protected:
-    WebGLRenderingContextBase(CanvasBase&, Ref<GraphicsContextGL>&&, WebGLContextAttributes);
+    WebGLRenderingContextBase(CanvasBase&, WebGLContextAttributes);
 
     friend class EXTDisjointTimerQuery;
     friend class EXTDisjointTimerQueryWebGL2;
@@ -536,7 +535,8 @@ protected:
     // Implementation helpers.
     friend class InspectorScopedShaderProgramHighlight;
 
-    virtual void initializeNewContext();
+    void initializeNewContext(Ref<GraphicsContextGL>);
+    virtual void initializeContextState();
     virtual void initializeVertexArrayObjects() = 0;
 
     // ActiveDOMObject
@@ -549,7 +549,6 @@ protected:
     void addContextObject(WebGLContextObject&);
     void detachAndRemoveAllObjects();
 
-    void setGraphicsContextGL(Ref<GraphicsContextGL>&&);
     void destroyGraphicsContextGL();
 
     enum CallerType {
@@ -619,7 +618,7 @@ protected:
     RefPtr<WebGLContextGroup> m_contextGroup;
     Lock m_objectGraphLock;
 
-    EventLoopTimerPtr m_restoreTimer { 0 };
+    EventLoopTimerHandle m_restoreTimer;
     GCGLErrorCodeSet m_errors;
     bool m_needsUpdate;
     bool m_markedCanvasDirty;
@@ -670,9 +669,6 @@ protected:
     };
     Vector<TextureUnitState> m_textureUnits;
     unsigned long m_activeTextureUnit;
-
-    RefPtr<WebGLTexture> m_blackTexture2D;
-    RefPtr<WebGLTexture> m_blackTextureCubeMap;
 
     Vector<GCGLenum> m_compressedTextureFormats;
 

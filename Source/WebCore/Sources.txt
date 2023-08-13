@@ -106,6 +106,7 @@ Modules/compression/DecompressionStreamDecoder.cpp
 Modules/contact-picker/ContactsManager.cpp
 Modules/contact-picker/NavigatorContacts.cpp
 Modules/cookie-consent/NavigatorCookieConsent.cpp
+Modules/cookie-store/CookieChangeEvent.cpp
 Modules/cookie-store/CookieStore.cpp
 Modules/credentialmanagement/BasicCredential.cpp
 Modules/credentialmanagement/CredentialsContainer.cpp
@@ -1716,6 +1717,7 @@ layout/formattingContexts/inline/InlineLineBoxBuilder.cpp
 layout/formattingContexts/inline/InlineLineBuilder.cpp
 layout/formattingContexts/inline/InlineLineBoxVerticalAligner.cpp
 layout/formattingContexts/inline/InlineTextItem.cpp
+layout/formattingContexts/inline/TextOnlyLineBuilder.cpp
 layout/formattingContexts/inline/display/InlineDisplayContent.cpp
 layout/formattingContexts/inline/display/InlineDisplayContentBuilder.cpp
 layout/formattingContexts/inline/display/InlineDisplayLineBuilder.cpp
@@ -1957,7 +1959,6 @@ page/SettingsBase.cpp
 page/ShadowRealmGlobalScope.cpp
 page/ShareDataReader.cpp
 page/SpatialNavigation.cpp
-page/SuspendableTimer.cpp
 page/TextIndicator.cpp
 page/UndoItem.cpp
 page/UndoManager.cpp
@@ -3289,6 +3290,8 @@ JSContactsManager.cpp
 JSContactsSelectOptions.cpp
 JSConvolverNode.cpp
 JSConvolverOptions.cpp
+JSCookieChangeEvent.cpp
+JSCookieChangeEventInit.cpp
 JSCookieInit.cpp
 JSCookieListItem.cpp
 JSCookieSameSite.cpp

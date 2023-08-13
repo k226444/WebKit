@@ -47,7 +47,7 @@ InlineFormattingGeometry::InlineFormattingGeometry(const InlineFormattingContext
 {
 }
 
-InlineLayoutUnit InlineFormattingGeometry::logicalTopForNextLine(const LineBuilder::LayoutResult& lineLayoutResult, const InlineRect& lineLogicalRect, const FloatingContext& floatingContext) const
+InlineLayoutUnit InlineFormattingGeometry::logicalTopForNextLine(const LineLayoutResult& lineLayoutResult, const InlineRect& lineLogicalRect, const FloatingContext& floatingContext) const
 {
     auto didManageToPlaceInlineContentOrFloat = !lineLayoutResult.inlineItemRange.isEmpty();
     if (didManageToPlaceInlineContentOrFloat) {
@@ -152,11 +152,11 @@ bool InlineFormattingGeometry::inlineLevelBoxAffectsLineBox(const InlineLevelBox
 
 InlineRect InlineFormattingGeometry::flipVisualRectToLogicalForWritingMode(const InlineRect& visualRect, WritingMode writingMode)
 {
-    switch (writingMode) {
-    case WritingMode::TopToBottom:
+    switch (writingModeToBlockFlowDirection(writingMode)) {
+    case BlockFlowDirection::TopToBottom:
         return visualRect;
-    case WritingMode::LeftToRight:
-    case WritingMode::RightToLeft: {
+    case BlockFlowDirection::LeftToRight:
+    case BlockFlowDirection::RightToLeft: {
         // FIXME: While vertical-lr and vertical-rl modes do differ in the ordering direction of line boxes
         // in a block container (see: https://drafts.csswg.org/css-writing-modes/#block-flow)
         // we ignore it for now as RenderBlock takes care of it for us.
@@ -294,7 +294,7 @@ InlineLayoutUnit InlineFormattingGeometry::contentLeftAfterLastLine(const Constr
         lineBoxWidth -= floatOffset;
     }
     lineBoxLeft += textIndent;
-    auto rootInlineBoxLeft = horizontalAlignmentOffset(lineBoxWidth, IsLastLineOrAfterLineBreak::Yes);
+    auto rootInlineBoxLeft = horizontalAlignmentOffset(formattingContext().root().style(), lineBoxWidth, IsLastLineOrAfterLineBreak::Yes);
     return lineBoxLeft + rootInlineBoxLeft;
 }
 
@@ -394,12 +394,11 @@ FloatingContext::Constraints InlineFormattingGeometry::floatConstraintsForLine(I
     return floatingContext.constraints(logicalTopCandidate, logicalBottomCandidate, FloatingContext::MayBeAboveLastFloat::Yes);
 }
 
-InlineLayoutUnit InlineFormattingGeometry::horizontalAlignmentOffset(InlineLayoutUnit horizontalAvailableSpace, IsLastLineOrAfterLineBreak isLastLineOrAfterLineBreak, std::optional<TextDirection> inlineBaseDirectionOverride) const
+InlineLayoutUnit InlineFormattingGeometry::horizontalAlignmentOffset(const RenderStyle& rootStyle, InlineLayoutUnit horizontalAvailableSpace, IsLastLineOrAfterLineBreak isLastLineOrAfterLineBreak, std::optional<TextDirection> inlineBaseDirectionOverride)
 {
     if (horizontalAvailableSpace <= 0)
         return { };
 
-    auto& rootStyle = formattingContext().root().style();
     auto isLeftToRightDirection = inlineBaseDirectionOverride.value_or(rootStyle.direction()) == TextDirection::LTR;
 
     auto computedHorizontalAlignment = [&] {

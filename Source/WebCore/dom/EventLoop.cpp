@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,32 +28,152 @@
 
 #include "Microtasks.h"
 #include "ScriptExecutionContext.h"
-#include "SuspendableTimer.h"
 
 namespace WebCore {
 
-class EventLoopTimer final : public SuspendableTimerBase {
+class EventLoopTimer final : public RefCounted<EventLoopTimer>, public TimerBase, public CanMakeWeakPtr<EventLoopTimer> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    EventLoopTimer(ScriptExecutionContext& context, std::unique_ptr<EventLoopTask>&& task)
-        : SuspendableTimerBase(&context)
-        , m_task(WTFMove(task))
+    enum class Type : bool { OneShot, Repeating };
+    static Ref<EventLoopTimer> create(Type type, std::unique_ptr<EventLoopTask>&& task) { return adoptRef(*new EventLoopTimer(type, WTFMove(task))); }
+
+    Type type() const { return m_type; }
+    EventLoopTaskGroup* group() const { return m_task ? m_task->group() : nullptr; }
+
+    void stop()
     {
+        if (!m_suspended)
+            TimerBase::stop();
+        else
+            m_suspended = false;
+        m_task = nullptr;
+    }
+
+    void suspend()
+    {
+        m_suspended = true;
+        m_savedIsActive = TimerBase::isActive();
+        if (m_savedIsActive) {
+            m_savedNextFireInterval = TimerBase::nextUnalignedFireInterval();
+            m_savedRepeatInterval = TimerBase::repeatInterval();
+            TimerBase::stop();
+        }
+    }
+
+    void resume()
+    {
+        ASSERT(m_suspended);
+        m_suspended = false;
+
+        if (m_savedIsActive)
+            start(m_savedNextFireInterval, m_savedRepeatInterval);
+    }
+
+    void startRepeating(Seconds nextFireInterval, Seconds repeatInterval)
+    {
+        ASSERT(m_type == Type::Repeating);
+        if (!m_suspended)
+            TimerBase::start(nextFireInterval, repeatInterval);
+        else {
+            m_savedIsActive = true;
+            m_savedNextFireInterval = nextFireInterval;
+            m_savedRepeatInterval = repeatInterval;
+        }
+    }
+
+    void startOneShot(Seconds interval)
+    {
+        ASSERT(m_type == Type::OneShot);
+        if (!m_suspended)
+            TimerBase::startOneShot(interval);
+        else {
+            m_savedIsActive = true;
+            m_savedNextFireInterval = interval;
+            m_savedRepeatInterval = 0_s;
+        }
+    }
+
+    void adjustNextFireTime(Seconds delta)
+    {
+        if (!m_suspended)
+            TimerBase::augmentFireInterval(delta);
+        else if (m_savedIsActive)
+            m_savedNextFireInterval += delta;
+        else {
+            m_savedIsActive = true;
+            m_savedNextFireInterval = delta;
+            m_savedRepeatInterval = 0_s;
+        }
+    }
+
+    void adjustRepeatInterval(Seconds delta)
+    {
+        if (!m_suspended)
+            TimerBase::augmentRepeatInterval(delta);
+        else if (m_savedIsActive) {
+            m_savedNextFireInterval += delta;
+            m_savedRepeatInterval += delta;
+        } else {
+            m_savedIsActive = true;
+            m_savedNextFireInterval = delta;
+            m_savedRepeatInterval = delta;
+        }
     }
 
 private:
-    void fired() final
+    EventLoopTimer(Type type, std::unique_ptr<EventLoopTask>&& task)
+        : m_task(WTFMove(task))
+        , m_type(type)
     {
-        m_task->execute();
     }
 
-    const char* activeDOMObjectName() const final
+    void fired() final
     {
-        return "EventLoopTimer";
+        Ref protectedThis { *this };
+        if (!m_task)
+            return;
+        WeakPtr group = m_task->group();
+        m_task->execute();
+        if (group && m_type == Type::OneShot)
+            group->removeScheduledTimer(*this);
     }
 
     std::unique_ptr<EventLoopTask> m_task;
+
+    Seconds m_savedNextFireInterval;
+    Seconds m_savedRepeatInterval;
+    Type m_type;
+    bool m_suspended { false };
+    bool m_savedIsActive { false };
 };
+
+EventLoopTimerHandle::EventLoopTimerHandle() = default;
+
+EventLoopTimerHandle::EventLoopTimerHandle(EventLoopTimer& timer)
+    : m_timer(&timer)
+{ }
+
+EventLoopTimerHandle::EventLoopTimerHandle(const EventLoopTimerHandle&) = default;
+EventLoopTimerHandle::EventLoopTimerHandle(EventLoopTimerHandle&&) = default;
+
+EventLoopTimerHandle::~EventLoopTimerHandle()
+{
+    if (!m_timer)
+        return;
+    if (auto* group = m_timer->group(); group && m_timer->refCount() == 1) {
+        if (m_timer->type() == EventLoopTimer::Type::OneShot)
+            group->removeScheduledTimer(*m_timer);
+        else
+            group->removeRepeatingTimer(*m_timer);
+    }
+}
+
+EventLoopTimerHandle& EventLoopTimerHandle::operator=(const EventLoopTimerHandle&) = default;
+EventLoopTimerHandle& EventLoopTimerHandle::operator=(std::nullptr_t)
+{
+    m_timer = nullptr;
+    return *this;
+}
 
 EventLoop::EventLoop() = default;
 EventLoop::~EventLoop() = default;
@@ -67,46 +187,46 @@ void EventLoop::queueTask(std::unique_ptr<EventLoopTask>&& task)
     m_tasks.append(WTFMove(task));
 }
 
-// FIXME: Remove the dependency on ScriptExecutionContext.
-EventLoopTimerPtr EventLoop::scheduleTask(Seconds timeout, ScriptExecutionContext& context, std::unique_ptr<EventLoopTask>&& action)
+EventLoopTimerHandle EventLoop::scheduleTask(Seconds timeout, std::unique_ptr<EventLoopTask>&& action)
 {
-    ASSERT(m_associatedContexts.contains(context));
-    auto timer = makeUnique<EventLoopTimer>(context, WTFMove(action));
-    timer->suspendIfNeeded();
+    auto timer = EventLoopTimer::create(EventLoopTimer::Type::OneShot, WTFMove(action));
     timer->startOneShot(timeout);
-    auto* pointer = timer.get();
-    m_scheduledTasks.add(WTFMove(timer));
-    return reinterpret_cast<EventLoopTimerPtr>(pointer);
+    if (timer->group()->isSuspended())
+        timer->suspend();
+
+    ASSERT(timer->group());
+    timer->group()->didAddTimer(timer);
+
+    EventLoopTimerHandle handle { timer };
+    m_scheduledTasks.add(timer);
+    return handle;
 }
 
-void EventLoop::cancelScheduledTask(EventLoopTimerPtr task)
+void EventLoop::removeScheduledTimer(EventLoopTimer& timer)
 {
-    auto it = m_scheduledTasks.find(reinterpret_cast<EventLoopTimer*>(task));
-    if (it == m_scheduledTasks.end())
-        return;
-    (*it)->cancel();
-    m_scheduledTasks.remove(it);
+    ASSERT(timer.type() == EventLoopTimer::Type::OneShot);
+    m_scheduledTasks.remove(timer);
 }
 
-// FIXME: Remove the dependency on ScriptExecutionContext.
-EventLoopTimerPtr EventLoop::scheduleRepeatingTask(Seconds nextTimeout, Seconds interval, ScriptExecutionContext& context, std::unique_ptr<EventLoopTask>&& action)
+EventLoopTimerHandle EventLoop::scheduleRepeatingTask(Seconds nextTimeout, Seconds interval, std::unique_ptr<EventLoopTask>&& action)
 {
-    ASSERT(m_associatedContexts.contains(context));
-    auto timer = makeUnique<EventLoopTimer>(context, WTFMove(action));
-    timer->suspendIfNeeded();
+    auto timer = EventLoopTimer::create(EventLoopTimer::Type::Repeating, WTFMove(action));
     timer->startRepeating(nextTimeout, interval);
-    auto* pointer = timer.get();
-    m_repeatingTasks.add(WTFMove(timer));
-    return reinterpret_cast<EventLoopTimerPtr>(pointer);
+    if (timer->group()->isSuspended())
+        timer->suspend();
+
+    ASSERT(timer->group());
+    timer->group()->didAddTimer(timer);
+
+    EventLoopTimerHandle handle { timer };
+    m_repeatingTasks.add(timer);
+    return handle;
 }
 
-void EventLoop::cancelRepeatingTask(EventLoopTimerPtr task)
+void EventLoop::removeRepeatingTimer(EventLoopTimer& timer)
 {
-    auto it = m_repeatingTasks.find(reinterpret_cast<EventLoopTimer*>(task));
-    if (it == m_repeatingTasks.end())
-        return;
-    (*it)->cancel();
-    m_repeatingTasks.remove(it);
+    ASSERT(timer.type() == EventLoopTimer::Type::Repeating);
+    m_repeatingTasks.remove(timer);
 }
 
 void EventLoop::queueMicrotask(std::unique_ptr<EventLoopTask>&& microtask)
@@ -210,6 +330,49 @@ void EventLoop::clearAllTasks()
     m_groupsWithSuspendedTasks.clear();
 }
 
+void EventLoopTaskGroup::markAsReadyToStop()
+{
+    if (isReadyToStop() || isStoppedPermanently())
+        return;
+
+    bool wasSuspended = isSuspended();
+    m_state = State::ReadyToStop;
+    if (auto* eventLoop = m_eventLoop.get())
+        eventLoop->stopAssociatedGroupsIfNecessary();
+
+    for (auto& timer : m_timers)
+        timer.stop();
+
+    if (wasSuspended && !isStoppedPermanently()) {
+        // We we get marked as ready to stop while suspended (happens when a CachedPage gets destroyed) then the
+        // queued tasks will never be able to run (since tasks don't run while suspended and we will never resume).
+        // As a result, we can simply discard our tasks and stop permanently.
+        stopAndDiscardAllTasks();
+    }
+}
+
+void EventLoopTaskGroup::suspend()
+{
+    ASSERT(!isStoppedPermanently());
+    ASSERT(!isReadyToStop());
+    m_state = State::Suspended;
+    // We don't remove suspended tasks to preserve the ordering.
+    // EventLoop::run checks whether each task's group is suspended or not.
+    for (auto& timer : m_timers)
+        timer.suspend();
+}
+
+void EventLoopTaskGroup::resume()
+{
+    ASSERT(!isStoppedPermanently());
+    ASSERT(!isReadyToStop());
+    m_state = State::Running;
+    if (auto* eventLoop = m_eventLoop.get())
+        eventLoop->resumeGroup(*this);
+    for (auto& timer : m_timers)
+        timer.resume();
+}
+
 void EventLoopTaskGroup::queueTask(std::unique_ptr<EventLoopTask>&& task)
 {
     if (m_state == State::Stopped || !m_eventLoop)
@@ -258,32 +421,86 @@ void EventLoopTaskGroup::runAtEndOfMicrotaskCheckpoint(EventLoop::TaskFunction&&
     microtaskQueue().addCheckpointTask(makeUnique<EventLoopFunctionDispatchTask>(TaskSource::IndexedDB, *this, WTFMove(function)));
 }
 
-EventLoopTimerPtr EventLoopTaskGroup::scheduleTask(Seconds timeout, ScriptExecutionContext& context, TaskSource source, EventLoop::TaskFunction&& function)
+EventLoopTimerHandle EventLoopTaskGroup::scheduleTask(Seconds timeout, TaskSource source, EventLoop::TaskFunction&& function)
 {
     if (m_state == State::Stopped || !m_eventLoop)
-        return 0;
-    return m_eventLoop->scheduleTask(timeout, context, makeUnique<EventLoopFunctionDispatchTask>(source, *this, WTFMove(function)));
+        return { };
+    return m_eventLoop->scheduleTask(timeout, makeUnique<EventLoopFunctionDispatchTask>(source, *this, WTFMove(function)));
 }
 
-void EventLoopTaskGroup::cancelScheduledTask(EventLoopTimerPtr timer)
+void EventLoopTaskGroup::removeScheduledTimer(EventLoopTimer& timer)
+{
+    ASSERT(timer.type() == EventLoopTimer::Type::OneShot);
+    if (RefPtr eventLoop = m_eventLoop.get())
+        eventLoop->removeScheduledTimer(timer);
+    m_timers.remove(timer);
+}
+
+EventLoopTimerHandle EventLoopTaskGroup::scheduleRepeatingTask(Seconds nextTimeout, Seconds interval, TaskSource source, EventLoop::TaskFunction&& function)
 {
     if (m_state == State::Stopped || !m_eventLoop)
+        return { };
+    return m_eventLoop->scheduleRepeatingTask(nextTimeout, interval, makeUnique<EventLoopFunctionDispatchTask>(source, *this, WTFMove(function)));
+}
+
+void EventLoopTaskGroup::removeRepeatingTimer(EventLoopTimer& timer)
+{
+    ASSERT(timer.type() == EventLoopTimer::Type::Repeating);
+    if (RefPtr eventLoop = m_eventLoop.get())
+        eventLoop->removeRepeatingTimer(timer);
+    m_timers.remove(timer);
+}
+
+void EventLoopTaskGroup::setTimerAlignment(EventLoopTimerHandle handle, TimerAlignment& timerAlignment)
+{
+    if (!handle.m_timer)
         return;
-    m_eventLoop->cancelScheduledTask(timer);
+    ASSERT(m_timers.contains(*handle.m_timer));
+    handle.m_timer->setTimerAlignment(timerAlignment);
 }
 
-EventLoopTimerPtr EventLoopTaskGroup::scheduleRepeatingTask(Seconds nextTimeout, Seconds interval, ScriptExecutionContext& context, TaskSource source, EventLoop::TaskFunction&& function)
+void EventLoopTaskGroup::didChangeTimerAlignmentInterval(EventLoopTimerHandle handle)
 {
-    if (m_state == State::Stopped || !m_eventLoop)
-        return 0;
-    return m_eventLoop->scheduleRepeatingTask(nextTimeout, interval, context, makeUnique<EventLoopFunctionDispatchTask>(source, *this, WTFMove(function)));
-}
-
-void EventLoopTaskGroup::cancelRepeatingTask(EventLoopTimerPtr timer)
-{
-    if (m_state == State::Stopped || !m_eventLoop)
+    if (!handle.m_timer)
         return;
-    m_eventLoop->cancelRepeatingTask(timer);
+    ASSERT(m_timers.contains(*handle.m_timer));
+    handle.m_timer->didChangeAlignmentInterval();
+}
+
+void EventLoopTaskGroup::setTimerHasReachedMaxNestingLevel(EventLoopTimerHandle handle, bool value)
+{
+    if (!handle.m_timer)
+        return;
+    ASSERT(m_timers.contains(*handle.m_timer));
+    handle.m_timer->setHasReachedMaxNestingLevel(value);
+}
+
+void EventLoopTaskGroup::adjustTimerNextFireTime(EventLoopTimerHandle handle, Seconds delta)
+{
+    if (!handle.m_timer)
+        return;
+    ASSERT(m_timers.contains(*handle.m_timer));
+    handle.m_timer->adjustNextFireTime(delta);
+}
+
+void EventLoopTaskGroup::adjustTimerRepeatInterval(EventLoopTimerHandle handle, Seconds delta)
+{
+    if (!handle.m_timer)
+        return;
+    ASSERT(m_timers.contains(*handle.m_timer));
+    handle.m_timer->adjustRepeatInterval(delta);
+}
+
+void EventLoopTaskGroup::didAddTimer(EventLoopTimer& timer)
+{
+    auto result = m_timers.add(timer);
+    ASSERT_UNUSED(result, result.isNewEntry);
+}
+
+void EventLoopTaskGroup::didRemoveTimer(EventLoopTimer& timer)
+{
+    auto didRemove = m_timers.remove(timer);
+    ASSERT_UNUSED(didRemove, didRemove);
 }
 
 void EventLoop::forEachAssociatedContext(const Function<void(ScriptExecutionContext&)>& apply)

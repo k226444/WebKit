@@ -3869,17 +3869,17 @@ LinkPreloadEnabled:
 
 LinkPreloadResponsiveImagesEnabled:
   type: bool
-  status: testable
+  status: stable
   category: networking
   humanReadableName: "Link preload responsive images"
   humanReadableDescription: "Enable link preload responsive images"
   defaultValue:
     WebKitLegacy:
-      default: false
+      default: true
     WebKit:
-      default: false
+      default: true
     WebCore:
-      default: false
+      default: true
 
 LinkSanitizerEnabled:
   type: bool
@@ -5201,9 +5201,12 @@ ProcessSwapOnCrossSiteWindowOpenEnabled:
    category: networking
    humanReadableName: "Swap Processes on Cross-Site Window Open"
    humanReadableDescription: "Swap WebContent Processes on cross-site window.open"
-   webcoreBinding: none
    exposed: [ WebKit ]
    defaultValue:
+     WebCore:
+       default: false
+     WebKitLegacy:
+       default: false
      WebKit:
        default: false
 
@@ -5323,7 +5326,7 @@ ReportingEnabled:
 
 RequestIdleCallbackEnabled:
   type: bool
-  status: unstable
+  status: preview
   category: dom
   humanReadableName: "requestIdleCallback"
   humanReadableDescription: "Enable requestIdleCallback support"
@@ -6184,6 +6187,20 @@ ShrinksStandaloneImagesToFit:
       default: true
     WebCore:
       default: true
+
+SidewaysWritingModesEnabled:
+  type: bool
+  status: testable
+  category: css
+  humanReadableName: "Sideways writing modes"
+  humanReadableDescription: "Enable support for sideways writing modes"
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
 
 SiteIsolationEnabled:
   type: bool
