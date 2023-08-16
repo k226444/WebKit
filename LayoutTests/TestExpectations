@@ -33,6 +33,7 @@ tiled-drawing [ Skip ]
 fast/attachment/cocoa [ Skip ]
 fast/attachment/mac [ Skip ]
 fast/css/ios [ Skip ]
+fast/css/mac [ Skip ]
 fast/css/watchos [ Skip ]
 fast/dom/Orientation/no-orientation-change-event-when-unparenting-view.html [ Skip ]
 fast/forms/date/date-editable-components [ Skip ]
@@ -1232,6 +1233,7 @@ http/tests/xmlhttprequest/gzip-content-type-no-content-encoding.html [ Skip ]
 # Only supported on CF (Apple) WebKit2 ports for now.
 requestidlecallback [ Skip ]
 imported/w3c/web-platform-tests/requestidlecallback [ Skip ]
+http/tests/eventloop/idle-callback-not-affected-by-timers-in-cross-origin.html [ Skip ]
 
 # Only supported in WebKit2.
 http/wpt/cross-origin-resource-policy/ [ Skip ]
@@ -1243,9 +1245,6 @@ fast/forms/file/entries-api/image-no-transcode-open-panel.html [ Skip ]
 fast/forms/file/entries-api/pages-jpeg-open-panel.html [ Skip ]
 fast/forms/file/entries-api/pdf-jpeg-open-panel.html [ Skip ]
 fast/forms/file/entries-api/png-raw-open-panel.html [ Skip ]
-
-# This test is currently only relevant on mac-wk2
-fast/canvas/webgl/context-update-on-display-configuration.html [ Skip ]
 
 fast/misc/valid-primary-screen-displayID.html [ Skip ]
 
@@ -6547,7 +6546,7 @@ imported/w3c/web-platform-tests/html/canvas/offscreen/filters/2d.filter.canvasFi
 imported/w3c/web-platform-tests/html/canvas/offscreen/text/fontVariantCaps-1.html [ ImageOnlyFailure ]
 imported/w3c/web-platform-tests/html/canvas/offscreen/text/fontVariantCaps-3.html [ ImageOnlyFailure ]
 imported/w3c/web-platform-tests/html/canvas/offscreen/text/fontVariantCaps-4.html [ ImageOnlyFailure ]
-imported/w3c/web-platform-tests/html/canvas/element/text/parent-style-relative-units.html [ Crash ]
+webkit.org/b/260220 imported/w3c/web-platform-tests/html/canvas/element/text/parent-style-relative-units.html [ Skip ]
 imported/w3c/web-platform-tests/html/canvas/offscreen/filters/2d.filter.canvasFilterObject.dropShadow.tentative.w.html [ Timeout ]
 imported/w3c/web-platform-tests/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.transform.infinity.worker.html [ Skip ]
 imported/w3c/web-platform-tests/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.transform.infinity.html [ Skip ]

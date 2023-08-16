@@ -4204,9 +4204,8 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
 - (void)_keyboardDidRequestDismissal:(NSNotification *)notification
 {
-    if (![self isFirstResponder])
-        return;
-    _keyboardDidRequestDismissal = YES;
+    if (_isEditable && [self isFirstResponder])
+        _keyboardDidRequestDismissal = YES;
 }
 
 - (void)copyForWebView:(id)sender
@@ -8549,6 +8548,15 @@ ALLOW_DEPRECATED_DECLARATIONS_END
         completion(nil, nil);
 }
 
+- (NSArray<UIMenuElement *> *)additionalMediaControlsContextMenuItemsForActionSheetAssistant:(WKActionSheetAssistant *)assistant
+{
+#if PLATFORM(VISION)
+    if (self.webView.fullscreenState == WKFullscreenStateInFullscreen)
+        return @[ [self.webView fullScreenWindowSceneDimmingAction] ];
+#endif
+    return @[ ];
+}
+
 #if USE(UICONTEXTMENU)
 
 - (UITargetedPreview *)createTargetedContextMenuHintForActionSheetAssistant:(WKActionSheetAssistant *)assistant
@@ -8646,26 +8654,8 @@ static WebCore::DataOwnerType coreDataOwnerType(_UIDataOwner platformType)
 
 - (WebCore::DataOwnerType)_dataOwnerForPasteboard:(WebKit::PasteboardAccessIntent)intent
 {
-    auto specifiedType = [&] {
-        if (intent == WebKit::PasteboardAccessIntent::Read)
-            return coreDataOwnerType(self._dataOwnerForPaste);
-
-        if (intent == WebKit::PasteboardAccessIntent::Write)
-            return coreDataOwnerType(self._dataOwnerForCopy);
-
-        ASSERT_NOT_REACHED();
-        return WebCore::DataOwnerType::Undefined;
-    }();
-
-    if (specifiedType != WebCore::DataOwnerType::Undefined)
-        return specifiedType;
-
-#if !PLATFORM(MACCATALYST)
-    if ([[PAL::getMCProfileConnectionClass() sharedConnection] isURLManaged:[_webView URL]])
-        return WebCore::DataOwnerType::Enterprise;
-#endif
-
-    return WebCore::DataOwnerType::Undefined;
+    auto clientSuppliedDataOwner = intent == WebKit::PasteboardAccessIntent::Read ? self._dataOwnerForPaste : self._dataOwnerForCopy;
+    return coreDataOwnerType([_webView _effectiveDataOwner:clientSuppliedDataOwner]);
 }
 
 - (RetainPtr<WKTargetedPreviewContainer>)_createPreviewContainerWithLayerName:(NSString *)layerName
@@ -10724,8 +10714,13 @@ static RetainPtr<NSItemProvider> createItemProvider(const WebKit::WebPageProxy& 
 - (void)_writePromisedAttachmentToPasteboard:(WebCore::PromisedAttachmentInfo&&)info
 {
 #if !PLATFORM(WATCHOS) && !PLATFORM(APPLETV)
-    if (auto item = createItemProvider(*_page, WTFMove(info)))
+    auto item = createItemProvider(*_page, WTFMove(info));
+    if (!item)
+        return;
+
+    [UIPasteboard _performAsDataOwner:[_webView _effectiveDataOwner:self._dataOwnerForCopy] block:^{
         UIPasteboard.generalPasteboard.itemProviders = @[ item.get() ];
+    }];
 #else
     UNUSED_PARAM(info);
 #endif
