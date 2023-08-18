@@ -37,12 +37,13 @@ namespace Layout {
 class InlineContentBreaker;
 struct TextOnlyLineBreakResult;
 
-class TextOnlyLineBuilder : public AbstractLineBuilder {
+class TextOnlySimpleLineBuilder : public AbstractLineBuilder {
 public:
-    TextOnlyLineBuilder(const InlineFormattingContext&, HorizontalConstraints rootHorizontalConstraints, const InlineItems&);
+    TextOnlySimpleLineBuilder(const InlineFormattingContext&, HorizontalConstraints rootHorizontalConstraints, const InlineItems&);
     LineLayoutResult layoutInlineContent(const LineInput&, const std::optional<PreviousLine>&) final;
 
     static bool isEligibleForSimplifiedTextOnlyInlineLayout(const ElementBox& root, const InlineFormattingState&, const FloatingState* = nullptr);
+    static bool hasIntrinsicWidthSpecificStyle(const RenderStyle& rootStyle);
 
 private:
     InlineItemPosition placeInlineTextContent(const InlineItemRange&);
@@ -50,7 +51,8 @@ private:
     TextOnlyLineBreakResult handleInlineTextContent(const InlineContentBreaker::ContinuousContent&, const InlineItemRange&);
     void initialize(const InlineItemRange&, const InlineRect& initialLogicalRect, const std::optional<PreviousLine>&);
     void handleLineEnding(InlineItemPosition, size_t layoutRangeEndIndex);
-    size_t rebuildLine(const InlineItemRange&, const InlineTextItem&);
+    size_t revertToTrailingItem(const InlineItemRange&, const InlineTextItem&);
+    size_t revertToLastNonOverflowingItem(const InlineItemRange&);
 
     bool isFirstFormattedLine() const { return !m_previousLine.has_value(); }
 

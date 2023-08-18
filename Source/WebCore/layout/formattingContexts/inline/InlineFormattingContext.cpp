@@ -26,8 +26,10 @@
 #include "config.h"
 #include "InlineFormattingContext.h"
 
+#include "AvailableLineWidthOverride.h"
 #include "FloatingContext.h"
 #include "FontCascade.h"
+#include "InlineContentBalancer.h"
 #include "InlineDamage.h"
 #include "InlineDisplayBox.h"
 #include "InlineDisplayContentBuilder.h"
@@ -47,7 +49,7 @@
 #include "LayoutState.h"
 #include "Logging.h"
 #include "RenderStyleInlines.h"
-#include "TextOnlyLineBuilder.h"
+#include "TextOnlySimpleLineBuilder.h"
 #include "TextUtil.h"
 #include <wtf/IsoMallocInlines.h>
 #include <wtf/text/TextStream.h>
@@ -96,8 +98,15 @@ InlineLayoutResult InlineFormattingContext::layoutInFlowAndFloatContent(const Co
         return PreviousLine { lastLineIndex, { }, { }, { }, { } };
     };
 
-    if (TextOnlyLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), formattingState(), &floatingState)) {
-        auto simplifiedLineBuilder = TextOnlyLineBuilder { *this, constraints.horizontal(), inlineItems };
+    if (root().style().textWrap() == TextWrap::Balance) {
+        auto balancer = InlineContentBalancer { *this, inlineLayoutState, inlineItems, constraints.horizontal() };
+        auto balancedLineWidths = balancer.computeBalanceConstraints();
+        if (balancedLineWidths)
+            inlineLayoutState.setAvailableLineWidthOverride({ *balancedLineWidths });
+    }
+
+    if (TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), formattingState(), &floatingState)) {
+        auto simplifiedLineBuilder = TextOnlySimpleLineBuilder { *this, constraints.horizontal(), inlineItems };
         return lineLayout(simplifiedLineBuilder, inlineItems, needsLayoutRange, previousLine(), constraints, inlineLayoutState, lineDamage);
     }
     auto lineBuilder = LineBuilder { *this, inlineLayoutState, floatingState, constraints.horizontal(), inlineItems };
@@ -130,9 +139,9 @@ IntrinsicWidthConstraints InlineFormattingContext::computedIntrinsicSizes(const 
     };
 
     auto intrinsicSizes = IntrinsicWidthConstraints { };
-    if (TextOnlyLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), inlineFormattingState)) {
-        auto simplifiedLineBuilder = TextOnlyLineBuilder { *this, { }, inlineFormattingState.inlineItems() };
-        intrinsicSizes = { computedIntrinsicValue(IntrinsicWidthMode::Minimum, simplifiedLineBuilder), computedIntrinsicValue(IntrinsicWidthMode::Maximum, simplifiedLineBuilder, MayCacheLayoutResult::Yes) };
+    if (TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), inlineFormattingState)) {
+        auto simplifiedLineBuilder = TextOnlySimpleLineBuilder { *this, { }, inlineFormattingState.inlineItems() };
+        intrinsicSizes = { computedIntrinsicValue(IntrinsicWidthMode::Minimum, simplifiedLineBuilder), computedIntrinsicValue(IntrinsicWidthMode::Maximum, simplifiedLineBuilder, TextOnlySimpleLineBuilder::hasIntrinsicWidthSpecificStyle(root().style()) ? MayCacheLayoutResult::No : MayCacheLayoutResult::Yes) };
     } else {
         auto floatingState = FloatingState { root() };
         auto parentBlockLayoutState = BlockLayoutState { floatingState, { } };
