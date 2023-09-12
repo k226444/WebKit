@@ -1,5 +1,5 @@
 [![C/C++ CI](https://github.com/k226444/WebKit/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/k226444/WebKit/actions/workflows/c-cpp.yml)
-[![macos11 CI](https://github.com/k226444/WebKit/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/k226444/WebKit/actions/workflows/c-cpp.yml)
+[](https://github.com/k226444/WebKit/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/k226444/WebKit/actions/workflows/c-cpp.yml)
 
 # WebKit
 
