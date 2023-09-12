@@ -155,9 +155,6 @@ void StyledElement::styleAttributeChanged(const AtomString& newStyleString, Attr
 
     elementData()->setStyleAttributeIsDirty(false);
 
-    if (auto* uniqueElementData = dynamicDowncast<UniqueElementData>(*elementData()))
-        uniqueElementData->m_inlineStyleForStyleResolution = nullptr;
-
     invalidateStyleInternal();
     InspectorInstrumentation::didInvalidateStyleAttr(*this);
 }
@@ -170,10 +167,6 @@ void StyledElement::invalidateStyleAttribute()
     }
 
     elementData()->setStyleAttributeIsDirty(true);
-
-    if (auto* uniqueElementData = dynamicDowncast<UniqueElementData>(*elementData()))
-        uniqueElementData->m_inlineStyleForStyleResolution = nullptr;
-
     invalidateStyleInternal();
 
     // In the rare case of selectors like "[style] ~ div" we need to synchronize immediately to invalidate.
@@ -295,14 +288,14 @@ const ImmutableStyleProperties* StyledElement::presentationalHintStyle() const
 void StyledElement::rebuildPresentationalHintStyle()
 {
     auto style = MutableStyleProperties::create(isSVGElement() ? SVGAttributeMode : HTMLQuirksMode);
-    for (const Attribute& attribute : attributesIterator())
+    for (auto& attribute : attributesIterator())
         collectPresentationalHintsForAttribute(attribute.name(), attribute.value(), style);
 
-    if (is<HTMLImageElement>(*this))
-        collectExtraStyleForPresentationalHints(style);
+    if (auto* imageElement = dynamicDowncast<HTMLImageElement>(*this))
+        imageElement->collectExtraStyleForPresentationalHints(style);
 
     // ShareableElementData doesn't store presentation attribute style, so make sure we have a UniqueElementData.
-    UniqueElementData& elementData = ensureUniqueElementData();
+    auto& elementData = ensureUniqueElementData();
 
     elementData.setPresentationalHintStyleIsDirty(false);
     if (style->isEmpty())
@@ -324,25 +317,6 @@ void StyledElement::addPropertyToPresentationalHintStyle(MutableStyleProperties&
 void StyledElement::addPropertyToPresentationalHintStyle(MutableStyleProperties& style, CSSPropertyID propertyID, const String& value)
 {
     style.setProperty(propertyID, value, false, CSSParserContext(document()));
-}
-
-const ImmutableStyleProperties* StyledElement::inlineStyleForStyleResolution() const
-{
-    if (!elementData())
-        return nullptr;
-
-    auto* inlineStyle = elementData()->m_inlineStyle.get();
-    if (!inlineStyle)
-        return nullptr;
-
-    if (auto* immutableStyle = dynamicDowncast<ImmutableStyleProperties>(*inlineStyle))
-        return immutableStyle;
-
-    auto& uniqueElementData = downcast<UniqueElementData>(*elementData());
-    if (!uniqueElementData.m_inlineStyleForStyleResolution)
-        uniqueElementData.m_inlineStyleForStyleResolution = inlineStyle->immutableCopyIfNeeded();
-
-    return uniqueElementData.m_inlineStyleForStyleResolution.get();
 }
 
 }

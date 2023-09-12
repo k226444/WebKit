@@ -2105,6 +2105,11 @@ void DocumentLoader::startLoadingMainResource()
 
     Ref<DocumentLoader> protectedThis(*this);
 
+    if (m_request.url().protocolIsAbout() && !(m_request.url().isAboutBlank() || m_request.url().isAboutSrcDoc())) {
+        cancelMainResourceLoad(frameLoader()->client().cannotShowURLError(m_request));
+        return;
+    }
+
     if (maybeLoadEmpty()) {
         DOCUMENTLOADER_RELEASE_LOG("startLoadingMainResource: Returning empty document");
         return;
@@ -2238,9 +2243,9 @@ void DocumentLoader::loadMainResource(ResourceRequest&& request)
         }
     }
 
-    m_mainResource = m_cachedResourceLoader->requestMainResource(WTFMove(mainResourceRequest)).value_or(nullptr);
+    auto mainResourceOrError = m_cachedResourceLoader->requestMainResource(WTFMove(mainResourceRequest));
 
-    if (!m_mainResource) {
+    if (!mainResourceOrError) {
         // The frame may have gone away if this load was cancelled synchronously and this was the last pending load.
         // This is because we may have fired the load event in a parent frame.
         if (!m_frame) {
@@ -2254,6 +2259,15 @@ void DocumentLoader::loadMainResource(ResourceRequest&& request)
             return;
         }
 
+        if (advancedPrivacyProtections().contains(AdvancedPrivacyProtections::HTTPSOnly)) {
+            if (auto httpNavigationWithHTTPSOnlyError = frameLoader()->client().httpNavigationWithHTTPSOnlyError(m_request); mainResourceOrError.error().domain() == httpNavigationWithHTTPSOnlyError.domain()
+                && mainResourceOrError.error().errorCode() == httpNavigationWithHTTPSOnlyError.errorCode()) {
+                DOCUMENTLOADER_RELEASE_LOG("loadMainResource: Unable to load main resource, URL has HTTP scheme with HTTPSOnly enabled");
+                cancelMainResourceLoad(mainResourceOrError.error());
+                return;
+            }
+        }
+
         DOCUMENTLOADER_RELEASE_LOG("loadMainResource: Unable to load main resource, returning empty document");
 
         setRequest(ResourceRequest());
@@ -2264,6 +2278,8 @@ void DocumentLoader::loadMainResource(ResourceRequest&& request)
         maybeLoadEmpty();
         return;
     }
+
+    m_mainResource = mainResourceOrError.value();
 
     ASSERT(m_frame);
 
@@ -2538,8 +2554,10 @@ ResourceError DocumentLoader::handleContentFilterDidBlock(ContentFilterUnblockHa
     unblockHandler.setUnreachableURL(documentURL());
     if (!unblockRequestDeniedScript.isEmpty() && frame()) {
         unblockHandler.wrapWithDecisionHandler([scriptController = WeakPtr { frame()->script() }, script = WTFMove(unblockRequestDeniedScript).isolatedCopy()](bool unblocked) {
-            if (!unblocked && scriptController)
-                scriptController->executeScriptIgnoringException(script);
+            if (!unblocked && scriptController) {
+                // FIXME: This probably needs to figure out if the origin is considered tanited.
+                scriptController->executeScriptIgnoringException(script, JSC::SourceTaintedOrigin::Untainted);
+            }
         });
     }
     frameLoader()->client().contentFilterDidBlockLoad(WTFMove(unblockHandler));

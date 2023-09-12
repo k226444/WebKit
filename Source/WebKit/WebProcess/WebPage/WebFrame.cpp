@@ -43,8 +43,11 @@
 #include "WKAPICast.h"
 #include "WKBundleAPICast.h"
 #include "WebChromeClient.h"
+#include "WebContextMenu.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebDocumentLoader.h"
+#include "WebEventConversion.h"
+#include "WebEventFactory.h"
 #include "WebImage.h"
 #include "WebPage.h"
 #include "WebPageProxyMessages.h"
@@ -59,11 +62,13 @@
 #include <WebCore/ArchiveResource.h>
 #include <WebCore/CertificateInfo.h>
 #include <WebCore/Chrome.h>
+#include <WebCore/ContextMenuController.h>
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/Editor.h>
 #include <WebCore/ElementChildIteratorInlines.h>
 #include <WebCore/EventHandler.h>
 #include <WebCore/File.h>
+#include <WebCore/FocusController.h>
 #include <WebCore/FrameSnapshotting.h>
 #include <WebCore/HTMLFormElement.h>
 #include <WebCore/HTMLFrameOwnerElement.h>
@@ -437,8 +442,8 @@ void WebFrame::transitionToLocal(std::optional<WebCore::LayerHostingContextIdent
 
 void WebFrame::didFinishLoadInAnotherProcess()
 {
-    if (auto* remoteFrame = dynamicDowncast<WebCore::RemoteFrame>(m_coreFrame.get()))
-        remoteFrame->didFinishLoadInAnotherProcess();
+    if (m_coreFrame)
+        m_coreFrame->didFinishLoadInAnotherProcess();
 }
 
 void WebFrame::invalidatePolicyListeners()
@@ -456,7 +461,7 @@ void WebFrame::didReceivePolicyDecision(uint64_t listenerID, PolicyCheckIdentifi
 {
 #if ENABLE(APP_BOUND_DOMAINS)
     if (m_page)
-        m_page->setIsNavigatingToAppBoundDomain(policyDecision.isNavigatingToAppBoundDomain, this);
+        m_page->setIsNavigatingToAppBoundDomain(policyDecision.isNavigatingToAppBoundDomain, Ref { *this });
 #endif
 
     if (!m_coreFrame)
@@ -481,7 +486,7 @@ void WebFrame::didReceivePolicyDecision(uint64_t listenerID, PolicyCheckIdentifi
     m_policyDownloadID = policyDecision.downloadID;
     if (policyDecision.navigationID) {
         auto* localFrame = dynamicDowncast<LocalFrame>(m_coreFrame.get());
-        if (WebDocumentLoader* documentLoader = localFrame ? static_cast<WebDocumentLoader*>(localFrame->loader().policyDocumentLoader()) : nullptr)
+        if (RefPtr documentLoader = localFrame ? static_cast<WebDocumentLoader*>(localFrame->loader().policyDocumentLoader()) : nullptr)
             documentLoader->setNavigationID(policyDecision.navigationID);
     }
 
@@ -591,7 +596,7 @@ String WebFrame::contentsAsString() const
     if (!document)
         return String();
 
-    auto documentElement = document->documentElement();
+    RefPtr documentElement = document->documentElement();
     if (!documentElement)
         return String();
 
@@ -806,7 +811,7 @@ void WebFrame::setAccessibleName(const AtomString& accessibleName)
     if (!document)
         return;
     
-    auto* rootObject = document->axObjectCache()->rootObject();
+    RefPtr rootObject = document->axObjectCache()->rootObject();
     if (!rootObject)
         return;
 
@@ -1196,6 +1201,106 @@ OptionSet<WebCore::AdvancedPrivacyProtections> WebFrame::originatorAdvancedPriva
         return { };
 
     return loader->originatorAdvancedPrivacyProtections();
+}
+
+#if ENABLE(CONTEXT_MENU_EVENT)
+static bool isContextClick(const PlatformMouseEvent& event)
+{
+#if USE(APPKIT)
+    return WebEventFactory::shouldBeHandledAsContextClick(event);
+#else
+    return event.button() == WebCore::RightButton;
+#endif
+}
+
+bool WebFrame::handleContextMenuEvent(const PlatformMouseEvent& platformMouseEvent)
+{
+    auto* coreLocalFrame = dynamicDowncast<LocalFrame>(coreFrame());
+    if (!coreLocalFrame)
+        return false;
+    IntPoint point = coreLocalFrame->view()->windowToContents(platformMouseEvent.position());
+    constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::DisallowUserAgentShadowContent,  HitTestRequest::Type::AllowChildFrameContent };
+    HitTestResult result = coreLocalFrame->eventHandler().hitTestResultAtPoint(point, hitType);
+
+    Ref frame = *coreLocalFrame;
+    if (result.innerNonSharedNode())
+        frame = *result.innerNonSharedNode()->document().frame();
+
+    bool handled = frame->eventHandler().sendContextMenuEvent(platformMouseEvent);
+#if ENABLE(CONTEXT_MENUS)
+    if (handled)
+        page()->contextMenu().show();
+#endif
+    return handled;
+}
+#endif
+
+bool WebFrame::handleMouseEvent(const WebMouseEvent& mouseEvent)
+{
+    auto* coreLocalFrame = dynamicDowncast<LocalFrame>(coreFrame());
+    if (!coreLocalFrame)
+        return false;
+
+    if (!coreLocalFrame->view())
+        return false;
+
+    PlatformMouseEvent platformMouseEvent = platform(mouseEvent);
+
+    switch (platformMouseEvent.type()) {
+    case PlatformEvent::Type::MousePressed: {
+#if ENABLE(CONTEXT_MENUS)
+        if (isContextClick(platformMouseEvent))
+            page()->corePage()->contextMenuController().clearContextMenu();
+#endif
+
+        bool handled = coreLocalFrame->eventHandler().handleMousePressEvent(platformMouseEvent);
+#if ENABLE(CONTEXT_MENU_EVENT)
+        if (isContextClick(platformMouseEvent))
+            handled = handleContextMenuEvent(platformMouseEvent);
+#endif
+        return handled;
+    }
+    case PlatformEvent::Type::MouseReleased:
+        if (mouseEvent.gestureWasCancelled() == GestureWasCancelled::Yes)
+            coreLocalFrame->eventHandler().invalidateClick();
+        return coreLocalFrame->eventHandler().handleMouseReleaseEvent(platformMouseEvent);
+
+    case PlatformEvent::Type::MouseMoved:
+#if PLATFORM(COCOA)
+        // We need to do a full, normal hit test during this mouse event if the page is active or if a mouse
+        // button is currently pressed. It is possible that neither of those things will be true since on
+        // Lion when legacy scrollbars are enabled, WebKit receives mouse events all the time. If it is one
+        // of those cases where the page is not active and the mouse is not pressed, then we can fire a more
+        // efficient scrollbars-only version of the event.
+        if (!(page()->corePage()->focusController().isActive() || (mouseEvent.button() != WebMouseEventButton::NoButton)))
+            return coreLocalFrame->eventHandler().passMouseMovedEventToScrollbars(platformMouseEvent);
+#endif
+        return coreLocalFrame->eventHandler().mouseMoved(platformMouseEvent);
+
+    case PlatformEvent::Type::MouseForceChanged:
+    case PlatformEvent::Type::MouseForceDown:
+    case PlatformEvent::Type::MouseForceUp:
+        return coreLocalFrame->eventHandler().handleMouseForceEvent(platformMouseEvent);
+
+    default:
+        ASSERT_NOT_REACHED();
+        return false;
+    }
+}
+
+bool WebFrame::handleKeyEvent(const WebKeyboardEvent& keyboardEvent)
+{
+    if (!m_coreFrame)
+        return false;
+
+    auto* page = m_coreFrame->page();
+    if (!page)
+        return false;
+
+    Ref frame = page->focusController().focusedOrMainFrame();
+    if (keyboardEvent.type() == WebEventType::Char && keyboardEvent.isSystemKey())
+        return frame->eventHandler().handleAccessKey(platform(keyboardEvent));
+    return frame->eventHandler().keyEvent(platform(keyboardEvent));
 }
 
 } // namespace WebKit

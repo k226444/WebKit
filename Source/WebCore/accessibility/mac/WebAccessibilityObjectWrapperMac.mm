@@ -1733,8 +1733,8 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
     if ([attributeName isEqualToString: NSAccessibilityHelpAttribute])
         return [self baseAccessibilityHelpText];
 
-    if ([attributeName isEqualToString: NSAccessibilityFocusedAttribute])
-        return [NSNumber numberWithBool: backingObject->isFocused()];
+    if ([attributeName isEqualToString:NSAccessibilityFocusedAttribute])
+        return @(backingObject->isFocused());
 
     if ([attributeName isEqualToString: NSAccessibilityEnabledAttribute])
         return [NSNumber numberWithBool: backingObject->isEnabled()];
@@ -2790,10 +2790,15 @@ ALLOW_DEPRECATED_IMPLEMENTATIONS_END
 // object that is specified by the given range.
 - (NSAttributedString *)attributedStringForNSRange:(const NSRange&)range
 {
+    if (!range.length)
+        return nil;
+
     auto* backingObject = self.axBackingObject;
     if (!backingObject)
         return nil;
-    return backingObject->attributedStringForTextMarkerRange(backingObject->textMarkerRangeForNSRange(range), AXCoreObject::SpellCheck::Yes).autorelease();
+
+    auto attributedString = backingObject->attributedStringForTextMarkerRange(backingObject->textMarkerRangeForNSRange(range), AXCoreObject::SpellCheck::Yes);
+    return [attributedString length] ? attributedString.autorelease() : nil;
 }
 
 - (NSInteger)_indexForTextMarker:(AXTextMarkerRef)markerRef

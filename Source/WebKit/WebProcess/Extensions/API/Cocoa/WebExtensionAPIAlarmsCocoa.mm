@@ -38,20 +38,20 @@
 #import "WebExtensionAPINamespace.h"
 #import "WebExtensionContextMessages.h"
 #import "WebExtensionContextProxy.h"
+#import "WebExtensionUtilities.h"
 #import "WebProcess.h"
-#import "_WKWebExtensionUtilities.h"
 #import <wtf/DateMath.h>
 
 namespace WebKit {
 
-static NSString *whenKey = @"when";
-static NSString *delayInMinutesKey = @"delayInMinutes";
-static NSString *periodInMinutesKey = @"periodInMinutes";
+static NSString * const whenKey = @"when";
+static NSString * const delayInMinutesKey = @"delayInMinutes";
+static NSString * const periodInMinutesKey = @"periodInMinutes";
 
-static NSString *nameKey = @"name";
-static NSString *scheduledTimeKey = @"scheduledTime";
+static NSString * const nameKey = @"name";
+static NSString * const scheduledTimeKey = @"scheduledTime";
 
-static NSString *emptyAlarmName = @"";
+static NSString * const emptyAlarmName = @"";
 
 static inline NSDictionary *toAPI(const WebExtensionAlarmParameters& alarm)
 {
@@ -85,26 +85,27 @@ void WebExtensionAPIAlarms::createAlarm(NSString *name, NSDictionary *alarmInfo,
 {
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/alarms/create
 
-    RELEASE_LOG_INFO(Extensions, "alarms.create()");
-
-    static NSArray<NSString *> *optionalKeys = @[
-        whenKey,
-        delayInMinutesKey,
-        periodInMinutesKey,
-    ];
-
     static NSDictionary<NSString *, id> *types = @{
         whenKey: NSNumber.class,
         delayInMinutesKey: NSNumber.class,
         periodInMinutesKey: NSNumber.class,
     };
 
-    if (![_WKWebExtensionUtilities validateContentsOfDictionary:alarmInfo requiredKeys:nil optionalKeys:optionalKeys keyToExpectedValueType:types outExceptionString:outExceptionString])
+    if (!validateDictionary(alarmInfo, @"info", nil, types, outExceptionString))
         return;
 
-    Seconds when = Seconds::fromMilliseconds(objectForKey<NSNumber>(alarmInfo, whenKey).doubleValue);
-    Seconds delay = Seconds::fromMinutes(objectForKey<NSNumber>(alarmInfo, delayInMinutesKey).doubleValue);
-    Seconds period = Seconds::fromMinutes(objectForKey<NSNumber>(alarmInfo, periodInMinutesKey).doubleValue);
+    auto *whenNumber = objectForKey<NSNumber>(alarmInfo, whenKey);
+    auto *delayNumber = objectForKey<NSNumber>(alarmInfo, delayInMinutesKey);
+    auto *periodNumber = objectForKey<NSNumber>(alarmInfo, periodInMinutesKey);
+
+    if (whenNumber && delayNumber) {
+        *outExceptionString = toErrorString(nil, @"info", @"it cannot specify both 'delayInMinutes' and 'when'");
+        return;
+    }
+
+    Seconds when = Seconds::fromMilliseconds(whenNumber.doubleValue);
+    Seconds delay = Seconds::fromMinutes(delayNumber.doubleValue);
+    Seconds period = Seconds::fromMinutes(periodNumber.doubleValue);
     Seconds currentTime = Seconds::fromMilliseconds(jsCurrentTime());
 
     Seconds initialInterval;
@@ -135,8 +136,6 @@ void WebExtensionAPIAlarms::get(NSString *name, Ref<WebExtensionCallbackHandler>
 {
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/alarms/get
 
-    RELEASE_LOG_INFO(Extensions, "alarms.get()");
-
     WebProcess::singleton().sendWithAsyncReply(Messages::WebExtensionContext::AlarmsGet(name ?: emptyAlarmName), [protectedThis = Ref { *this }, callback = WTFMove(callback)](std::optional<WebExtensionAlarmParameters> alarm) {
         callback->call(toAPI(alarm));
     }, extensionContext().identifier().toUInt64());
@@ -145,8 +144,6 @@ void WebExtensionAPIAlarms::get(NSString *name, Ref<WebExtensionCallbackHandler>
 void WebExtensionAPIAlarms::getAll(Ref<WebExtensionCallbackHandler>&& callback)
 {
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/alarms/getAll
-
-    RELEASE_LOG_INFO(Extensions, "alarms.getAll()");
 
     WebProcess::singleton().sendWithAsyncReply(Messages::WebExtensionContext::AlarmsGetAll(), [protectedThis = Ref { *this }, callback = WTFMove(callback)](Vector<WebExtensionAlarmParameters> alarms) {
         callback->call(toAPI(alarms));
@@ -157,8 +154,6 @@ void WebExtensionAPIAlarms::clear(NSString *name, Ref<WebExtensionCallbackHandle
 {
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/alarms/clear
 
-    RELEASE_LOG_INFO(Extensions, "alarms.clear()");
-
     WebProcess::singleton().sendWithAsyncReply(Messages::WebExtensionContext::AlarmsClear(name ?: emptyAlarmName), [protectedThis = Ref { *this }, callback = WTFMove(callback)]() {
         callback->call();
     }, extensionContext().identifier().toUInt64());
@@ -167,8 +162,6 @@ void WebExtensionAPIAlarms::clear(NSString *name, Ref<WebExtensionCallbackHandle
 void WebExtensionAPIAlarms::clearAll(Ref<WebExtensionCallbackHandler>&& callback)
 {
     // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/alarms/clearAll
-
-    RELEASE_LOG_INFO(Extensions, "alarms.clearAll()");
 
     WebProcess::singleton().sendWithAsyncReply(Messages::WebExtensionContext::AlarmsClearAll(), [protectedThis = Ref { *this }, callback = WTFMove(callback)]() {
         callback->call();
@@ -185,16 +178,13 @@ WebExtensionAPIEvent& WebExtensionAPIAlarms::onAlarm()
     return *m_onAlarm;
 }
 
-void WebExtensionContextProxy::dispatchAlarmEvent(const WebExtensionAlarmParameters& alarm)
+void WebExtensionContextProxy::dispatchAlarmsEvent(const WebExtensionAlarmParameters& alarm)
 {
-    // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/alarms/onAlarm
-
-    RELEASE_LOG_INFO(Extensions, "alarms.onAlarm dispatched");
-
-    NSDictionary *alarmDictionary = toAPI(alarm);
+    auto *details = toAPI(alarm);
 
     enumerateNamespaceObjects([&](auto& namespaceObject) {
-        namespaceObject.alarms().onAlarm().invokeListenersWithArgument(alarmDictionary);
+        // Documentation: https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/alarms/onAlarm
+        namespaceObject.alarms().onAlarm().invokeListenersWithArgument(details);
     });
 }
 

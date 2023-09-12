@@ -3831,8 +3831,7 @@ void WebPage::dynamicViewportSizeUpdate(const DynamicViewportSizeUpdate& target)
 
         HitTestResult hitTestResult = HitTestResult(unobscuredContentRectCenter);
 
-        auto* localFrame = dynamicDowncast<WebCore::LocalFrame>(frameView.frame());
-        if (auto* document = localFrame ? localFrame->document() : nullptr)
+        if (auto* document = frameView.frame().document())
             document->hitTest(HitTestRequest(), hitTestResult);
 
         if (Node* node = hitTestResult.innerNode()) {
@@ -3984,10 +3983,7 @@ void WebPage::dynamicViewportSizeUpdate(const DynamicViewportSizeUpdate& target)
     frameView.updateLayoutAndStyleIfNeededRecursive();
 
     // FIXME: Move settings from Frame to Frame and remove this check.
-    auto* localFrame = dynamicDowncast<LocalFrame>(frameView.frame());
-    if (!localFrame)
-        return;
-    auto& settings = localFrame->settings();
+    auto& settings = frameView.frame().settings();
     LayoutRect documentRect = IntRect(frameView.scrollOrigin(), frameView.contentsSize());
     auto layoutViewportSize = LocalFrameView::expandedLayoutViewportSize(frameView.baseLayoutViewportSize(), LayoutSize(documentRect.size()), settings.layoutViewportHeightExpansionFactor());
     LayoutRect layoutViewportRect = LocalFrameView::computeUpdatedLayoutViewportRect(frameView.layoutViewportRect(), documentRect, LayoutSize(newUnobscuredContentRect.size()), LayoutRect(newUnobscuredContentRect), layoutViewportSize, frameView.minStableLayoutViewportOrigin(), frameView.maxStableLayoutViewportOrigin(), LayoutViewportConstraint::ConstrainedToDocumentRect);
@@ -4486,8 +4482,7 @@ void WebPage::updateVisibleContentRects(const VisibleContentRectUpdateInfo& visi
         frameView.setLayoutViewportOverrideRect(LayoutRect(visibleContentRectUpdateInfo.layoutViewportRect()));
         if (selectionIsInsideFixedPositionContainer(*localMainFrame)) {
             // Ensure that the next layer tree commit contains up-to-date caret/selection rects.
-            if (auto* localFrame = dynamicDowncast<LocalFrame>(frameView.frame()))
-                localFrame->selection().setCaretRectNeedsUpdate();
+            frameView.frame().selection().setCaretRectNeedsUpdate();
             scheduleFullEditorStateUpdate();
         }
 
@@ -4949,12 +4944,27 @@ void WebPage::requestDocumentEditingContext(DocumentEditingContextRequest reques
         }
     }
 
-    auto makeString = [] (const VisiblePosition& start, const VisiblePosition& end) -> AttributedString {
+    auto isTextObscured = [] (const VisiblePosition& visiblePosition) {
+        if (RefPtr textControl = enclosingTextFormControl(visiblePosition.deepEquivalent())) {
+            if (auto* input = dynamicDowncast<HTMLInputElement>(textControl.get())) {
+                if (input->isAutoFilledAndObscured())
+                    return true;
+            }
+        }
+        return false;
+    };
+
+    auto makeString = [&isTextObscured] (const VisiblePosition& start, const VisiblePosition& end) -> AttributedString {
         auto range = makeSimpleRange(start, end);
         if (!range || range->collapsed())
             return { };
         // FIXME: This should return editing-offset-compatible attributed strings if that option is requested.
-        return WebCore::AttributedString::fromNSAttributedString(adoptNS([[NSAttributedString alloc] initWithString:WebCore::plainTextReplacingNoBreakSpace(*range, TextIteratorBehavior::EmitsOriginalText)]));
+
+        auto isObscured = isTextObscured(start);
+        TextIteratorBehaviors textBehaviors = { };
+        if (!isObscured)
+            textBehaviors = TextIteratorBehavior::EmitsOriginalText;
+        return WebCore::AttributedString::fromNSAttributedString(adoptNS([[NSAttributedString alloc] initWithString:WebCore::plainTextReplacingNoBreakSpace(*range, textBehaviors)]));
     };
 
     DocumentEditingContext context;

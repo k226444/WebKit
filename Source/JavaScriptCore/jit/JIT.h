@@ -185,7 +185,6 @@ namespace JSC {
 
         static constexpr GPRReg s_metadataGPR = LLInt::Registers::metadataTableGPR;
         static constexpr GPRReg s_constantsGPR = LLInt::Registers::pbGPR;
-        static constexpr JITConstantPool::Constant s_globalObjectConstant { 0 };
 
     private:
         void privateCompileMainPass();
@@ -242,6 +241,7 @@ namespace JSC {
         // Assuming s_constantsGPR is available.
         static void loadGlobalObject(CCallHelpers&, GPRReg);
         static void loadConstant(CCallHelpers&, unsigned constantIndex, GPRReg);
+        static void emitMaterializeMetadataAndConstantPoolRegisters(CCallHelpers&);
 
         void loadCodeBlockConstant(VirtualRegister, JSValueRegs);
         void loadCodeBlockConstantPayload(VirtualRegister, RegisterID);
@@ -332,10 +332,13 @@ namespace JSC {
         template <typename Bytecode>
         void emitArrayProfilingSiteWithCell(const Bytecode&, ptrdiff_t, RegisterID cellGPR, RegisterID scratchGPR);
 
+        void emitArrayProfilingSiteWithCellAndProfile(RegisterID cellGPR, RegisterID profileGPR, RegisterID scratchGPR);
+
         template<typename Op>
         ECMAMode ecmaMode(Op);
 
         void emitGetVirtualRegister(VirtualRegister src, JSValueRegs dst);
+        void emitGetVirtualRegisters(std::initializer_list<std::tuple<VirtualRegister, JSValueRegs>>);
         void emitGetVirtualRegisterPayload(VirtualRegister src, RegisterID dst);
         void emitPutVirtualRegister(VirtualRegister dst, JSValueRegs src);
 

@@ -74,12 +74,6 @@ RefPtr<RemoteImageBufferProxy> RemoteResourceCacheProxy::cachedImageBuffer(Rende
     return m_imageBuffers.get(renderingResourceIdentifier).get();
 }
 
-void RemoteResourceCacheProxy::releaseImageBuffer(RemoteImageBufferProxy& imageBuffer)
-{
-    forgetImageBuffer(imageBuffer.renderingResourceIdentifier());
-
-    m_remoteRenderingBackendProxy.releaseRenderingResource(imageBuffer.renderingResourceIdentifier());
-}
 
 void RemoteResourceCacheProxy::forgetImageBuffer(RenderingResourceIdentifier identifier)
 {
@@ -349,7 +343,7 @@ void RemoteResourceCacheProxy::releaseMemory()
     clearFontMap();
     clearFontCustomPlatformDataMap();
 
-    m_remoteRenderingBackendProxy.releaseAllRemoteResources();
+    m_remoteRenderingBackendProxy.releaseAllDrawingResources();
 }
 
 void RemoteResourceCacheProxy::releaseAllImageResources()

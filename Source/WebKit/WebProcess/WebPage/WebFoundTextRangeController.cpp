@@ -189,12 +189,6 @@ void WebFoundTextRangeController::didBeginTextSearchOperation()
     m_findPageOverlay->setNeedsDisplay();
 }
 
-void WebFoundTextRangeController::didEndTextSearchOperation()
-{
-    if (m_findPageOverlay)
-        m_webPage->corePage()->pageOverlayController().uninstallPageOverlay(*m_findPageOverlay, WebCore::PageOverlay::FadeMode::Fade);
-}
-
 void WebFoundTextRangeController::addLayerForFindOverlay(CompletionHandler<void(WebCore::PlatformLayerIdentifier)>&& completionHandler)
 {
     if (!m_findPageOverlay) {
@@ -405,11 +399,12 @@ WebCore::Document* WebFoundTextRangeController::documentForFoundTextRange(const 
 std::optional<WebCore::SimpleRange> WebFoundTextRangeController::simpleRangeFromFoundTextRange(WebFoundTextRange range)
 {
     return m_cachedFoundRanges.ensure(range, [&] () -> std::optional<WebCore::SimpleRange> {
-        auto* document = documentForFoundTextRange(range);
+        RefPtr document = documentForFoundTextRange(range);
         if (!document)
             return std::nullopt;
 
-        return resolveCharacterRange(makeRangeSelectingNodeContents(*document->documentElement()), { range.location, range.length }, WebCore::findIteratorOptions());
+        Ref documentElement = *document->documentElement();
+        return resolveCharacterRange(makeRangeSelectingNodeContents(documentElement), { range.location, range.length }, WebCore::findIteratorOptions());
     }).iterator->value;
 }
 

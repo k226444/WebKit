@@ -1405,7 +1405,7 @@ RefPtr<LocalFrame> EventHandler::subframeForTargetNode(Node* node)
     if (!is<LocalFrameView>(widget))
         return nullptr;
 
-    return dynamicDowncast<LocalFrame>(downcast<LocalFrameView>(*widget).frame());
+    return &downcast<LocalFrameView>(*widget).frame();
 }
 
 static bool isSubmitImage(Node* node)
@@ -3161,10 +3161,10 @@ static bool scrollViaNonPlatformEvent(ScrollableArea& scrollableArea, const Whee
     ScrollGranularity scrollGranularity = wheelGranularityToScrollGranularity(wheelEvent.deltaMode());
     bool didHandleWheelEvent = false;
     if (float absoluteDelta = std::abs(filteredDelta.width()))
-        didHandleWheelEvent |= scrollableArea.scroll(filteredDelta.width() > 0 ? ScrollRight : ScrollLeft, scrollGranularity, absoluteDelta);
+        didHandleWheelEvent |= scrollableArea.scroll(filteredDelta.width() > 0 ? ScrollDirection::ScrollRight : ScrollDirection::ScrollLeft, scrollGranularity, absoluteDelta);
 
     if (float absoluteDelta = std::abs(filteredDelta.height()))
-        didHandleWheelEvent |= scrollableArea.scroll(filteredDelta.height() > 0 ? ScrollDown : ScrollUp, scrollGranularity, absoluteDelta);
+        didHandleWheelEvent |= scrollableArea.scroll(filteredDelta.height() > 0 ? ScrollDirection::ScrollDown : ScrollDirection::ScrollUp, scrollGranularity, absoluteDelta);
     return didHandleWheelEvent;
 }
 
@@ -5074,11 +5074,8 @@ bool EventHandler::passWheelEventToWidget(const PlatformWheelEvent& event, Widge
     auto* frameView = dynamicDowncast<LocalFrameView>(widget);
     if (!frameView)
         return false;
-    RefPtr localFrame = dynamicDowncast<LocalFrame>(frameView->frame());
-    if (!localFrame)
-        return false;
 
-    return localFrame->eventHandler().handleWheelEvent(event, processingSteps);
+    return frameView->frame().eventHandler().handleWheelEvent(event, processingSteps);
 }
 
 bool EventHandler::tabsToAllFormControls(KeyboardEvent*) const

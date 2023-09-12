@@ -32,6 +32,7 @@
 #include "BackForwardCache.h"
 #include "BackForwardClient.h"
 #include "BackForwardController.h"
+#include "BadgeClient.h"
 #include "BroadcastChannelRegistry.h"
 #include "CacheStorageProvider.h"
 #include "CachedImage.h"
@@ -66,6 +67,7 @@
 #include "EventLoop.h"
 #include "EventNames.h"
 #include "ExtensionStyleSheets.h"
+#include "FilterRenderingMode.h"
 #include "FocusController.h"
 #include "FontCache.h"
 #include "FrameLoader.h"
@@ -159,12 +161,13 @@
 #include "TextIterator.h"
 #include "TextRecognitionResult.h"
 #include "TextResourceDecoder.h"
+#include "ThermalMitigationNotifier.h"
 #include "UserContentProvider.h"
 #include "UserContentURLPattern.h"
-#include "UserInputBridge.h"
 #include "UserScript.h"
 #include "UserStyleSheet.h"
 #include "ValidationMessageClient.h"
+#include "VisibilityState.h"
 #include "VisitedLinkState.h"
 #include "VisitedLinkStore.h"
 #include "VoidCallback.h"
@@ -292,7 +295,6 @@ Page::Page(PageConfiguration&& pageConfiguration)
 #if ENABLE(CONTEXT_MENUS)
     , m_contextMenuController(makeUniqueRef<ContextMenuController>(*this, WTFMove(pageConfiguration.contextMenuClient)))
 #endif
-    , m_userInputBridge(makeUniqueRef<UserInputBridge>(*this))
     , m_inspectorController(makeUniqueRef<InspectorController>(*this, WTFMove(pageConfiguration.inspectorClient)))
     , m_pointerCaptureController(makeUniqueRef<PointerCaptureController>(*this))
 #if ENABLE(POINTER_LOCK)
@@ -340,7 +342,8 @@ Page::Page(PageConfiguration&& pageConfiguration)
 #endif
     , m_isUtilityPage(isUtilityPageChromeClient(chrome().client()))
     , m_performanceMonitor(isUtilityPage() ? nullptr : makeUnique<PerformanceMonitor>(*this))
-    , m_lowPowerModeNotifier(makeUnique<LowPowerModeNotifier>([this](bool isLowPowerModeEnabled) { handleLowModePowerChange(isLowPowerModeEnabled); }))
+    , m_lowPowerModeNotifier(makeUnique<LowPowerModeNotifier>([this](bool isLowPowerModeEnabled) { handleLowPowerModeChange(isLowPowerModeEnabled); }))
+    , m_thermalMitigationNotifier(makeUnique<ThermalMitigationNotifier>([this](bool thermalMitigationEnabled) { handleThermalMitigationChange(thermalMitigationEnabled); }))
     , m_performanceLogging(makeUnique<PerformanceLogging>(*this))
 #if PLATFORM(MAC) && (ENABLE(SERVICE_CONTROLS) || ENABLE(TELEPHONE_NUMBER_DETECTION))
     , m_servicesOverlayController(makeUnique<ServicesOverlayController>(*this))
@@ -373,6 +376,7 @@ Page::Page(PageConfiguration&& pageConfiguration)
     , m_opportunisticTaskScheduler(OpportunisticTaskScheduler::create(*this))
     , m_contentSecurityPolicyModeForExtension(WTFMove(pageConfiguration.contentSecurityPolicyModeForExtension))
     , m_badgeClient(WTFMove(pageConfiguration.badgeClient))
+    , m_historyItemClient(WTFMove(pageConfiguration.historyItemClient))
 {
     updateTimerThrottlingState();
 
@@ -416,6 +420,9 @@ Page::Page(PageConfiguration&& pageConfiguration)
 
     if (m_lowPowerModeNotifier->isLowPowerModeEnabled())
         m_throttlingReasons.add(ThrottlingReason::LowPowerMode);
+
+    if (m_thermalMitigationNotifier->thermalMitigationEnabled())
+        m_throttlingReasons.add(ThrottlingReason::ThermalMitigation);
 }
 
 Page::~Page()
@@ -1484,12 +1491,12 @@ void Page::didCommitLoad()
         geolocationController->didNavigatePage();
 #endif
 
-    m_opportunisticTaskDeferralScopeForFirstPaint = m_opportunisticTaskScheduler->makeDeferralScope();
+    m_isWaitingForFirstMeaningfulPaint = true;
 }
 
 void Page::didFirstMeaningfulPaint()
 {
-    m_opportunisticTaskDeferralScopeForFirstPaint = nullptr;
+    m_isWaitingForFirstMeaningfulPaint = false;
 }
 
 void Page::didFinishLoad()
@@ -1509,17 +1516,17 @@ bool Page::isOnlyNonUtilityPage() const
 
 void Page::setLowPowerModeEnabledOverrideForTesting(std::optional<bool> isEnabled)
 {
-    // Remove ThrottlingReason::LowPowerMode so handleLowModePowerChange() can do its work.
+    // Remove ThrottlingReason::LowPowerMode so handleLowPowerModeChange() can do its work.
     m_throttlingReasonsOverridenForTesting.remove(ThrottlingReason::LowPowerMode);
 
     // Use the current low power mode value of the device.
     if (!isEnabled) {
-        handleLowModePowerChange(m_lowPowerModeNotifier->isLowPowerModeEnabled());
+        handleLowPowerModeChange(m_lowPowerModeNotifier->isLowPowerModeEnabled());
         return;
     }
 
     // Override the value and add ThrottlingReason::LowPowerMode so it override the device state.
-    handleLowModePowerChange(isEnabled.value());
+    handleLowPowerModeChange(isEnabled.value());
     m_throttlingReasonsOverridenForTesting.add(ThrottlingReason::LowPowerMode);
 }
 
@@ -2252,7 +2259,7 @@ void Page::setIsVisuallyIdleInternal(bool isVisuallyIdle)
     chrome().client().renderingUpdateFramesPerSecondChanged();
 }
 
-void Page::handleLowModePowerChange(bool isLowPowerModeEnabled)
+void Page::handleLowPowerModeChange(bool isLowPowerModeEnabled)
 {
     if (!canUpdateThrottlingReason(ThrottlingReason::LowPowerMode))
         return;
@@ -2264,6 +2271,19 @@ void Page::handleLowModePowerChange(bool isLowPowerModeEnabled)
     if (auto *scheduler = existingRenderingUpdateScheduler())
         scheduler->adjustRenderingUpdateFrequency();
     chrome().client().renderingUpdateFramesPerSecondChanged();
+
+    updateDOMTimerAlignmentInterval();
+}
+
+void Page::handleThermalMitigationChange(bool thermalMitigationEnabled)
+{
+    if (!canUpdateThrottlingReason(ThrottlingReason::ThermalMitigation))
+        return;
+
+    if (thermalMitigationEnabled == m_throttlingReasons.contains(ThrottlingReason::ThermalMitigation))
+        return;
+
+    m_throttlingReasons.set(ThrottlingReason::ThermalMitigation, thermalMitigationEnabled);
 
     updateDOMTimerAlignmentInterval();
 }
@@ -2483,10 +2503,11 @@ void Page::updateDOMTimerAlignmentInterval()
     bool needsIncreaseTimer = false;
 
     switch (m_timerThrottlingState) {
-    case TimerThrottlingState::Disabled:
-        m_domTimerAlignmentInterval = isLowPowerModeEnabled() ? DOMTimer::defaultAlignmentIntervalInLowPowerMode() : DOMTimer::defaultAlignmentInterval();
+    case TimerThrottlingState::Disabled: {
+        bool isInLowPowerOrThermallyMitigatedMode = isLowPowerModeEnabled() || isThermalMitigationEnabled();
+        m_domTimerAlignmentInterval = isInLowPowerOrThermallyMitigatedMode ? DOMTimer::defaultAlignmentIntervalInLowPowerOrThermallyMitigatedMode() : DOMTimer::defaultAlignmentInterval();
         break;
-
+    }
     case TimerThrottlingState::Enabled:
         m_domTimerAlignmentInterval = DOMTimer::hiddenPageAlignmentInterval();
         break;
@@ -2510,7 +2531,7 @@ void Page::updateDOMTimerAlignmentInterval()
 
     // If throttling is enabled, auto-increasing of throttling is enabled, and the auto-increase
     // limit has not yet been reached, and then arm the timer to consider an increase. Time to wait
-    // between increases is equal to the current throttle time. Since alinment interval increases
+    // between increases is equal to the current throttle time. Since alignment interval increases
     // exponentially, time between steps is exponential too.
     if (!needsIncreaseTimer)
         m_domTimerAlignmentIntervalIncreaseTimer.stop();
@@ -3070,7 +3091,7 @@ static const double gMaximumUnpaintedAreaRatio = 0.04;
 
 bool Page::isCountingRelevantRepaintedObjects() const
 {
-    return m_isCountingRelevantRepaintedObjects && m_requestedLayoutMilestones.contains(DidHitRelevantRepaintedObjectsAreaThreshold);
+    return m_isCountingRelevantRepaintedObjects && m_requestedLayoutMilestones.contains(LayoutMilestone::DidHitRelevantRepaintedObjectsAreaThreshold);
 }
 
 void Page::startCountingRelevantRepaintedObjects()
@@ -3170,7 +3191,7 @@ void Page::addRelevantRepaintedObject(RenderObject* object, const LayoutRect& ob
         m_isCountingRelevantRepaintedObjects = false;
         resetRelevantPaintedObjectCounter();
         if (auto* frame = dynamicDowncast<LocalFrame>(mainFrame()))
-            frame->loader().didReachLayoutMilestone(DidHitRelevantRepaintedObjectsAreaThreshold);
+            frame->loader().didReachLayoutMilestone(LayoutMilestone::DidHitRelevantRepaintedObjectsAreaThreshold);
     }
 }
 
@@ -4515,13 +4536,19 @@ void Page::reloadExecutionContextsForOrigin(const ClientOrigin& origin, std::opt
     }
 }
 
-void Page::performOpportunisticallyScheduledTasks(MonotonicTime deadline)
+void Page::opportunisticallyRunIdleCallbacks()
 {
-    TraceScope tracingScope(PerformOpportunisticallyScheduledTasksStart, PerformOpportunisticallyScheduledTasksEnd, (deadline - MonotonicTime::now()).microseconds());
-    forEachWindowEventLoop([&](WindowEventLoop& eventLoop) {
+    forEachWindowEventLoop([&](auto& eventLoop) {
         eventLoop.opportunisticallyRunIdleCallbacks();
     });
-    commonVM().performOpportunisticallyScheduledTasks(deadline);
+}
+
+void Page::performOpportunisticallyScheduledTasks(MonotonicTime deadline)
+{
+    OptionSet<JSC::VM::SchedulerOptions> options;
+    if (m_opportunisticTaskScheduler->hasImminentlyScheduledWork())
+        options.add(JSC::VM::SchedulerOptions::HasImminentlyScheduledWork);
+    commonVM().performOpportunisticallyScheduledTasks(deadline, options);
 }
 
 } // namespace WebCore

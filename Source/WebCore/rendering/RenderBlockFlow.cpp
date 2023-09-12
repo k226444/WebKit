@@ -593,6 +593,9 @@ void RenderBlockFlow::layoutBlock(bool relayoutChildren, LayoutUnit pageLogicalH
             relayoutChildren = true;
         layoutPositionedObjects(relayoutChildren || isDocumentElementRenderer());
     }
+
+    updateDescendantTransformsAfterLayout();
+
     // Add overflow from children (unless we're multi-column, since in that case all our child overflow is clipped anyway).
     computeOverflow(oldClientAfterEdge);
 
@@ -2416,7 +2419,7 @@ void RenderBlockFlow::styleDidChange(StyleDifference diff, const RenderStyle* ol
         auto shouldInvalidateLineLayoutPath = [&] {
             if (selfNeedsLayout() || legacyLineLayout())
                 return true;
-            if (modernLineLayout() && !LayoutIntegration::LineLayout::canUseForAfterStyleChange(*this, diff))
+            if (modernLineLayout() && !LayoutIntegration::LineLayout::canUseForAfterBlockStyleChange(*this, diff))
                 return true;
             return false;
         };
@@ -4036,11 +4039,8 @@ void RenderBlockFlow::invalidateLineLayoutPath()
                 renderer.setPreferredLogicalWidthsDirty(true);
             }
         }
-        auto path = UndeterminedPath;
-        if (modernLineLayout() && modernLineLayout()->shouldSwitchToLegacyOnInvalidation())
-            path = ForcedLegacyPath;
         m_lineLayout = std::monostate();
-        setLineLayoutPath(path);
+        setLineLayoutPath(UndeterminedPath);
         if (selfNeedsLayout() || normalChildNeedsLayout())
             return;
         // FIXME: We should just kick off a subtree layout here (if needed at all) see webkit.org/b/172947.
@@ -4998,8 +4998,6 @@ LayoutUnit RenderBlockFlow::blockFormattingContextInFlowBlockLevelContentHeight(
     // Child's margin box starting location + border box height + margin after size
     return logicalMarginBoxTopForChild(*lastChild) + logicalMarginBoxHeightForChild(*lastChild);
 }
-
-
 
 }
 // namespace WebCore

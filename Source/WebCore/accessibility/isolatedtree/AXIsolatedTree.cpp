@@ -36,6 +36,7 @@
 #include <wtf/SetForScope.h>
 
 namespace WebCore {
+DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(AXIsolatedTree);
 
 HashMap<PageIdentifier, Ref<AXIsolatedTree>>& AXIsolatedTree::treePageCache()
 {
@@ -573,6 +574,9 @@ void AXIsolatedTree::updateNodeProperties(AXCoreObject& axObject, const Vector<A
             propertyMap.set(AXPropertyName::SupportsKeyShortcuts, axObject.supportsKeyShortcuts());
             propertyMap.set(AXPropertyName::KeyShortcuts, axObject.keyShortcuts().isolatedCopy());
             break;
+        case AXPropertyName::SelectedChildren:
+            propertyMap.set(AXPropertyName::SelectedChildren, axIDs(axObject.selectedChildren()));
+            break;
         case AXPropertyName::SupportsPosInSet:
             propertyMap.set(AXPropertyName::SupportsPosInSet, axObject.supportsPosInSet());
             break;
@@ -742,6 +746,13 @@ void AXIsolatedTree::updateChildren(AccessibilityObject& axObject, ResolveNodeCh
     updateNodeAndDependentProperties(*axAncestor);
 }
 
+void AXIsolatedTree::updateChildrenForObjects(const ListHashSet<RefPtr<AccessibilityObject>>& axObjects)
+{
+    // FIXME: optimize this method to avoid updating the same object or subtree.
+    for (auto& axObject : axObjects)
+        updateChildren(*axObject);
+}
+
 void AXIsolatedTree::setPageActivityState(OptionSet<ActivityState> state)
 {
     ASSERT(isMainThread());
@@ -762,18 +773,23 @@ OptionSet<ActivityState> AXIsolatedTree::lockedPageActivityState() const
     return m_pageActivityState;
 }
 
-RefPtr<AXIsolatedObject> AXIsolatedTree::focusedNode()
+AXID AXIsolatedTree::focusedNodeID()
 {
-    AXTRACE("AXIsolatedTree::focusedNode"_s);
     ASSERT(!isMainThread());
     // applyPendingChanges can destroy `this` tree, so protect it until the end of this method.
     Ref protectedThis { *this };
     // Apply pending changes in case focus has changed and hasn't been updated.
     applyPendingChanges();
-    AXLOG(makeString("focusedNodeID ", m_focusedNodeID.loggingString()));
+    return m_focusedNodeID;
+}
+
+RefPtr<AXIsolatedObject> AXIsolatedTree::focusedNode()
+{
+    AXTRACE("AXIsolatedTree::focusedNode"_s);
+    ASSERT(!isMainThread());
     AXLOG("focused node:");
-    AXLOG(objectForID(m_focusedNodeID));
-    return objectForID(m_focusedNodeID);
+    AXLOG(objectForID(focusedNodeID()));
+    return objectForID(focusedNodeID());
 }
 
 RefPtr<AXIsolatedObject> AXIsolatedTree::rootNode()
@@ -800,12 +816,8 @@ void AXIsolatedTree::setFocusedNodeID(AXID axID)
     AXLOG(makeString("axID ", axID.loggingString()));
     ASSERT(isMainThread());
 
-    AXPropertyMap propertyMap;
-    propertyMap.set(AXPropertyName::IsFocused, true);
-
     Locker locker { m_changeLogLock };
     m_pendingFocusedNodeID = axID;
-    m_pendingPropertyChanges.append({ axID, propertyMap });
 }
 
 void AXIsolatedTree::updateLoadingProgress(double newProgressValue)
@@ -936,13 +948,6 @@ void AXIsolatedTree::applyPendingChanges()
 
     if (m_pendingFocusedNodeID != m_focusedNodeID) {
         AXLOG(makeString("focusedNodeID ", m_focusedNodeID.loggingString(), " pendingFocusedNodeID ", m_pendingFocusedNodeID.loggingString()));
-
-        if (m_focusedNodeID.isValid()) {
-            // Set the old focused object's IsFocused property to false.
-            AXPropertyMap propertyMap;
-            propertyMap.set(AXPropertyName::IsFocused, false);
-            m_pendingPropertyChanges.append({ m_focusedNodeID, propertyMap });
-        }
         m_focusedNodeID = m_pendingFocusedNodeID;
     }
 

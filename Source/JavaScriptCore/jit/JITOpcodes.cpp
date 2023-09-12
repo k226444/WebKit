@@ -156,16 +156,20 @@ void JIT::emit_op_instanceof(const JSInstruction* currentInstruction)
     using BaselineJITRegisters::Instanceof::resultJSR;
     using BaselineJITRegisters::Instanceof::valueJSR;
     using BaselineJITRegisters::Instanceof::protoJSR;
-    using BaselineJITRegisters::Instanceof::FastPath::stubInfoGPR;
+    using BaselineJITRegisters::Instanceof::stubInfoGPR;
 
-    emitGetVirtualRegister(value, valueJSR);
-    emitGetVirtualRegister(proto, protoJSR);
-    
+    emitGetVirtualRegisters({
+        { value, valueJSR },
+        { proto, protoJSR }
+    });
+
+    auto [ stubInfo, stubInfoIndex ] = addUnlinkedStructureStubInfo();
+    loadConstant(stubInfoIndex, stubInfoGPR);
+
     // Check that proto are cells. baseVal must be a cell - this is checked by the get_by_id for Symbol.hasInstance.
     emitJumpSlowCaseIfNotJSCell(valueJSR, value);
     emitJumpSlowCaseIfNotJSCell(protoJSR, proto);
 
-    auto [ stubInfo, stubInfoIndex ] = addUnlinkedStructureStubInfo();
     JITInstanceOfGenerator gen(
         nullptr, stubInfo, JITType::BaselineJIT, CodeOrigin(m_bytecodeIndex), CallSiteIndex(m_bytecodeIndex),
         RegisterSetBuilder::stubUnavailableRegisters(),
@@ -173,9 +177,8 @@ void JIT::emit_op_instanceof(const JSInstruction* currentInstruction)
         valueJSR.payloadGPR(),
         protoJSR.payloadGPR(),
         stubInfoGPR);
-    gen.m_unlinkedStubInfoConstantIndex = stubInfoIndex;
 
-    gen.generateBaselineDataICFastPath(*this, stubInfoIndex, stubInfoGPR);
+    gen.generateBaselineDataICFastPath(*this);
 #if USE(JSVALUE32_64)
     boxBoolean(resultJSR.payloadGPR(), resultJSR);
 #endif
@@ -193,17 +196,12 @@ void JIT::emitSlow_op_instanceof(const JSInstruction*, Vector<SlowCaseEntry>::it
     JITInstanceOfGenerator& gen = m_instanceOfs[m_instanceOfIndex++];
 
     Label coldPathBegin = label();
-
     using BaselineJITRegisters::Instanceof::valueJSR;
     using BaselineJITRegisters::Instanceof::protoJSR;
-    using BaselineJITRegisters::Instanceof::SlowPath::globalObjectGPR;
-    using BaselineJITRegisters::Instanceof::SlowPath::stubInfoGPR;
-
+    using BaselineJITRegisters::Instanceof::globalObjectGPR;
+    using BaselineJITRegisters::Instanceof::stubInfoGPR;
     loadGlobalObject(globalObjectGPR);
-    loadConstant(gen.m_unlinkedStubInfoConstantIndex, stubInfoGPR);
-    callOperation<decltype(operationInstanceOfOptimize)>(
-        Address(stubInfoGPR, StructureStubInfo::offsetOfSlowOperation()),
-        globalObjectGPR, stubInfoGPR, valueJSR, protoJSR);
+    callOperation<decltype(operationInstanceOfOptimize)>(Address(stubInfoGPR, StructureStubInfo::offsetOfSlowOperation()), valueJSR, protoJSR, globalObjectGPR, stubInfoGPR);
     static_assert(BaselineJITRegisters::Instanceof::resultJSR == returnValueJSR);
     gen.reportSlowPathCall(coldPathBegin, Call());
 }
@@ -431,8 +429,15 @@ void JIT::emit_op_set_function_name(const JSInstruction* currentInstruction)
     constexpr GPRReg functionGPR = preferredArgumentGPR<SlowOperation, 1>();
     constexpr JSValueRegs nameJSR = preferredArgumentJSR<SlowOperation, 2>();
 
+#if USE(JSVALUE32_64)
     emitGetVirtualRegisterPayload(bytecode.m_function, functionGPR);
     emitGetVirtualRegister(bytecode.m_name, nameJSR);
+#else
+    emitGetVirtualRegisters({
+        { bytecode.m_function, JSValueRegs { functionGPR } },
+        { bytecode.m_name, nameJSR }
+    });
+#endif
     loadGlobalObject(globalObjectGPR);
     callOperation(operationSetFunctionName, globalObjectGPR, functionGPR, nameJSR);
 }
@@ -614,8 +619,10 @@ void JIT::emit_op_jneq_ptr(const JSInstruction* currentInstruction)
 void JIT::emit_op_eq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpEq>();
-    emitGetVirtualRegister(bytecode.m_lhs, regT0);
-    emitGetVirtualRegister(bytecode.m_rhs, regT1);
+    emitGetVirtualRegisters({
+        { bytecode.m_lhs, JSValueRegs { regT0 } },
+        { bytecode.m_rhs, JSValueRegs { regT1 } }
+    });
     emitJumpSlowCaseIfNotInt(regT0, regT1, regT2);
     compare32(Equal, regT1, regT0, regT0);
     boxBoolean(regT0, jsRegT10);
@@ -626,8 +633,10 @@ void JIT::emit_op_jeq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpJeq>();
     unsigned target = jumpTarget(currentInstruction, bytecode.m_targetLabel);
-    emitGetVirtualRegister(bytecode.m_lhs, regT0);
-    emitGetVirtualRegister(bytecode.m_rhs, regT1);
+    emitGetVirtualRegisters({
+        { bytecode.m_lhs, JSValueRegs { regT0 } },
+        { bytecode.m_rhs, JSValueRegs { regT1 } }
+    });
     emitJumpSlowCaseIfNotInt(regT0, regT1, regT2);
     addJump(branch32(Equal, regT0, regT1), target);
 }
@@ -680,8 +689,10 @@ MacroAssemblerCodeRef<JITThunkPtrTag> JIT::valueIsTruthyGenerator(VM& vm)
 void JIT::emit_op_neq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpNeq>();
-    emitGetVirtualRegister(bytecode.m_lhs, regT0);
-    emitGetVirtualRegister(bytecode.m_rhs, regT1);
+    emitGetVirtualRegisters({
+        { bytecode.m_lhs, JSValueRegs { regT0 } },
+        { bytecode.m_rhs, JSValueRegs { regT1 } }
+    });
     emitJumpSlowCaseIfNotInt(regT0, regT1, regT2);
     compare32(NotEqual, regT1, regT0, regT0);
     boxBoolean(regT0, jsRegT10);
@@ -693,8 +704,10 @@ void JIT::emit_op_jneq(const JSInstruction* currentInstruction)
 {
     auto bytecode = currentInstruction->as<OpJneq>();
     unsigned target = jumpTarget(currentInstruction, bytecode.m_targetLabel);
-    emitGetVirtualRegister(bytecode.m_lhs, regT0);
-    emitGetVirtualRegister(bytecode.m_rhs, regT1);
+    emitGetVirtualRegisters({
+        { bytecode.m_lhs, JSValueRegs { regT0 } },
+        { bytecode.m_rhs, JSValueRegs { regT1 } }
+    });
     emitJumpSlowCaseIfNotInt(regT0, regT1, regT2);
     addJump(branch32(NotEqual, regT0, regT1), target);
 }
@@ -755,8 +768,10 @@ void JIT::compileOpStrictEq(const JSInstruction* currentInstruction)
     VirtualRegister src1 = bytecode.m_lhs;
     VirtualRegister src2 = bytecode.m_rhs;
 
-    emitGetVirtualRegister(src1, regT0);
-    emitGetVirtualRegister(src2, regT1);
+    emitGetVirtualRegisters({
+        { src1, JSValueRegs { regT0 } },
+        { src2, JSValueRegs { regT1 } }
+    });
 
 #if USE(BIGINT32)
     /* At a high level we do (assuming 'type' to be StrictEq):
@@ -841,8 +856,10 @@ void JIT::compileOpStrictEqJump(const JSInstruction* currentInstruction)
     VirtualRegister src1 = bytecode.m_lhs;
     VirtualRegister src2 = bytecode.m_rhs;
 
-    emitGetVirtualRegister(src1, regT0);
-    emitGetVirtualRegister(src2, regT1);
+    emitGetVirtualRegisters({
+        { src1, JSValueRegs { regT0 } },
+        { src2, JSValueRegs { regT1 } }
+    });
 
 #if USE(BIGINT32)
     /* At a high level we do (assuming 'type' to be StrictEq):
@@ -1244,6 +1261,9 @@ void JIT::emit_op_enter(const JSInstruction*)
 
     using BaselineJITRegisters::Enter::canBeOptimizedGPR;
     using BaselineJITRegisters::Enter::localsToInitGPR;
+
+    if (m_profiledCodeBlock->couldBeTainted())
+        store8(TrustedImm32(1), vm().addressOfMightBeExecutingTaintedCode());
 
     move(TrustedImm32(canBeOptimized()), canBeOptimizedGPR);
     move(TrustedImm32(localsToInit), localsToInitGPR);
@@ -1843,8 +1863,15 @@ void JIT::emit_op_log_shadow_chicken_tail(const JSInstruction* currentInstructio
         GPRReg scratch2Reg = regT2;
         ensureShadowChickenPacket(vm(), shadowPacketReg, scratch1Reg, scratch2Reg);
     }
+#if USE(JSVALUE32_64)
     emitGetVirtualRegister(bytecode.m_thisValue, jsRegT32);
     emitGetVirtualRegisterPayload(bytecode.m_scope, regT4);
+#else
+    emitGetVirtualRegisters({
+        { bytecode.m_thisValue, jsRegT32 },
+        { bytecode.m_scope, JSValueRegs { regT4 } }
+    });
+#endif
     loadPtr(addressFor(CallFrameSlot::codeBlock), regT1);
     logShadowChickenTailPacket(shadowPacketReg, jsRegT32, regT4, regT1, CallSiteIndex(m_bytecodeIndex));
 }

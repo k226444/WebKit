@@ -238,12 +238,12 @@ void CanvasRenderingContext2DBase::unwindStateStack()
     // Ensure that the state stack in the ImageBuffer's context
     // is cleared before destruction, to avoid assertions in the
     // GraphicsContext dtor.
-    if (size_t stackSize = m_stateStack.size()) {
-        if (auto* context = canvasBase().existingDrawingContext()) {
-            while (--stackSize)
-                context->restore();
-        }
-    }
+    size_t stackSize = m_stateStack.size();
+    if (stackSize <= 1)
+        return;
+    // We need to keep the last state because it is tracked by CanvasBase::m_contextStateSaver.
+    if (auto* context = canvasBase().existingDrawingContext())
+        context->unwindStateStack(stackSize - 1);
 }
 
 CanvasRenderingContext2DBase::~CanvasRenderingContext2DBase()
@@ -266,13 +266,21 @@ bool CanvasRenderingContext2DBase::isAccelerated() const
 void CanvasRenderingContext2DBase::reset()
 {
     unwindStateStack();
+
     m_stateStack.resize(1);
     m_stateStack.first() = State();
+
     m_path.clear();
     m_unrealizedSaveCount = 0;
     m_cachedImageData = std::nullopt;
 
     m_recordingContext = nullptr;
+
+    clearAccumulatedDirtyRect();
+    resetTransform();
+
+    canvasBase().resetGraphicsContextState();
+    clearCanvas();
 }
 
 CanvasRenderingContext2DBase::State::State()
@@ -2074,6 +2082,14 @@ ExceptionOr<RefPtr<CanvasPattern>> CanvasRenderingContext2DBase::createPattern(H
 
     if (cachedImage->status() == CachedResource::LoadError)
         return Exception { InvalidStateError };
+
+    // Image may have a zero-width or a zero-height.
+    Length intrinsicWidth;
+    Length intrinsicHeight;
+    FloatSize intrinsicRatio;
+    cachedImage->computeIntrinsicDimensions(intrinsicWidth, intrinsicHeight, intrinsicRatio);
+    if (intrinsicWidth.isZero() || intrinsicHeight.isZero())
+        return nullptr;
 
     return createPattern(*cachedImage, imageElement.renderer(), repeatX, repeatY);
 }

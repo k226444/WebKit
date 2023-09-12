@@ -200,6 +200,7 @@ public:
     
     bool isValid() const;
     bool isExpanded() const;
+    bool supportsExpanded() const;
     bool isChecked() const;
     JSRetainPtr<JSStringRef> currentStateValue() const;
     JSRetainPtr<JSStringRef> sortDirection() const;
@@ -230,6 +231,7 @@ public:
     JSRetainPtr<JSStringRef> attributesOfColumnHeaders();
     JSRetainPtr<JSStringRef> attributesOfRowHeaders();
     JSRetainPtr<JSStringRef> attributesOfColumns();
+    JSValueRef columns();
     JSRetainPtr<JSStringRef> attributesOfRows();
     JSRetainPtr<JSStringRef> attributesOfVisibleCells();
     JSRetainPtr<JSStringRef> attributesOfHeader();

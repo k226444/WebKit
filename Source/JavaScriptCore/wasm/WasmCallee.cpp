@@ -29,20 +29,21 @@
 #if ENABLE(WEBASSEMBLY)
 
 #include "LLIntExceptions.h"
-#include "WasmCalleeRegistry.h"
+#include "NativeCalleeRegistry.h"
 #include "WasmCallingConvention.h"
 #include "WasmModuleInformation.h"
 
 namespace JSC { namespace Wasm {
 
 Callee::Callee(Wasm::CompilationMode compilationMode)
-    : m_compilationMode(compilationMode)
-    , m_implementationVisibility(ImplementationVisibility::Private)
+    : NativeCallee(NativeCallee::Category::Wasm, ImplementationVisibility::Private)
+    , m_compilationMode(compilationMode)
 {
 }
 
 Callee::Callee(Wasm::CompilationMode compilationMode, size_t index, std::pair<const Name*, RefPtr<NameSection>>&& name)
-    : m_compilationMode(compilationMode)
+    : NativeCallee(NativeCallee::Category::Wasm, ImplementationVisibility::Public)
+    , m_compilationMode(compilationMode)
     , m_indexOrName(index, WTFMove(name))
 {
 }
@@ -57,7 +58,7 @@ inline void Callee::runWithDowncast(const Func& func)
     case CompilationMode::LLIntMode:
         func(static_cast<LLIntCallee*>(this));
         break;
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
     case CompilationMode::BBQMode:
         func(static_cast<BBQCallee*>(this));
         break;
@@ -127,9 +128,8 @@ RegisterAtOffsetList* Callee::calleeSaveRegisters()
     return result;
 }
 
-void Callee::operator delete(Callee* callee, std::destroying_delete_t)
+void Callee::destroy(Callee* callee)
 {
-    CalleeRegistry::singleton().unregisterCallee(callee);
     callee->runWithDowncast([](auto* derived) {
         std::destroy_at(derived);
         std::decay_t<decltype(*derived)>::freeAfterDestruction(derived);
@@ -155,13 +155,13 @@ JITCallee::JITCallee(Wasm::CompilationMode compilationMode, size_t index, std::p
 void JITCallee::setEntrypoint(Wasm::Entrypoint&& entrypoint)
 {
     m_entrypoint = WTFMove(entrypoint);
-    CalleeRegistry::singleton().registerCallee(this);
+    NativeCalleeRegistry::singleton().registerCallee(this);
 }
 
 WasmToJSCallee::WasmToJSCallee()
     : Callee(Wasm::CompilationMode::WasmToJSMode)
 {
-    CalleeRegistry::singleton().registerCallee(this);
+    NativeCalleeRegistry::singleton().registerCallee(this);
 }
 
 IPIntCallee::IPIntCallee(FunctionIPIntMetadataGenerator& generator, size_t index, std::pair<const Name*, RefPtr<NameSection>>&& name)
@@ -186,7 +186,7 @@ void IPIntCallee::setEntrypoint(CodePtr<WasmEntryPtrTag> entrypoint)
 {
     ASSERT(!m_entrypoint);
     m_entrypoint = entrypoint;
-    CalleeRegistry::singleton().registerCallee(this);
+    NativeCalleeRegistry::singleton().registerCallee(this);
 }
 
 RegisterAtOffsetList* IPIntCallee::calleeSaveRegistersImpl()
@@ -251,7 +251,7 @@ void LLIntCallee::setEntrypoint(CodePtr<WasmEntryPtrTag> entrypoint)
 {
     ASSERT(!m_entrypoint);
     m_entrypoint = entrypoint;
-    CalleeRegistry::singleton().registerCallee(this);
+    NativeCalleeRegistry::singleton().registerCallee(this);
 }
 
 RegisterAtOffsetList* LLIntCallee::calleeSaveRegistersImpl()
@@ -289,7 +289,7 @@ const WasmInstruction* LLIntCallee::outOfLineJumpTarget(const WasmInstruction* p
     return m_instructions->at(offset + target).ptr();
 }
 
-#if ENABLE(WEBASSEMBLY_B3JIT)
+#if ENABLE(WEBASSEMBLY_OMGJIT)
 void OptimizingJITCallee::addCodeOrigin(unsigned firstInlineCSI, unsigned lastInlineCSI, const Wasm::ModuleInformation& info, uint32_t functionIndex)
 {
     if (!nameSections.size())

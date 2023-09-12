@@ -73,6 +73,7 @@ set(WebCore_PRIVATE_INCLUDE_DIRECTORIES
     "${WEBCORE_DIR}/Modules/webdatabase"
     "${WEBCORE_DIR}/Modules/webdriver"
     "${WEBCORE_DIR}/Modules/websockets"
+    "${WEBCORE_DIR}/Modules/webtransport"
     "${WEBCORE_DIR}/Modules/webxr"
     "${WEBCORE_DIR}/accessibility"
     "${WEBCORE_DIR}/accessibility/isolatedtree"
@@ -240,6 +241,7 @@ set(WebCore_IDL_INCLUDES
     Modules/webaudio
     Modules/webdatabase
     Modules/websockets
+    Modules/webtransport
 
     bindings/js
 
@@ -299,6 +301,9 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/cookie-store/CookieStore.idl
     Modules/cookie-store/CookieStoreDeleteOptions.idl
     Modules/cookie-store/CookieStoreGetOptions.idl
+    Modules/cookie-store/CookieStoreManager.idl
+    Modules/cookie-store/ExtendableCookieChangeEvent.idl
+    Modules/cookie-store/ExtendableCookieChangeEventInit.idl
     Modules/cookie-store/LocalDOMWindow+CookieStore.idl
 
     Modules/credentialmanagement/BasicCredential.idl
@@ -730,10 +735,11 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/webauthn/ResidentKeyRequirement.idl
     Modules/webauthn/UserVerificationRequirement.idl
 
+    Modules/webcodecs/AudioSampleFormat.idl
     Modules/webcodecs/AvcEncoderConfig.idl
     Modules/webcodecs/BitrateMode.idl
-    Modules/webcodecs/LatencyMode.idl
     Modules/webcodecs/HardwareAcceleration.idl
+    Modules/webcodecs/LatencyMode.idl
     Modules/webcodecs/PlaneLayout.idl
     Modules/webcodecs/VideoColorPrimaries.idl
     Modules/webcodecs/VideoColorSpace.idl
@@ -742,7 +748,14 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/webcodecs/VideoPixelFormat.idl
     Modules/webcodecs/VideoTransferCharacteristics.idl
     Modules/webcodecs/WebCodecsAlphaOption.idl
+    Modules/webcodecs/WebCodecsAudioData.idl
+    Modules/webcodecs/WebCodecsAudioDataOutputCallback.idl
+    Modules/webcodecs/WebCodecsAudioDecoder.idl
+    Modules/webcodecs/WebCodecsAudioDecoderConfig.idl
+    Modules/webcodecs/WebCodecsAudioDecoderSupport.idl
     Modules/webcodecs/WebCodecsCodecState.idl
+    Modules/webcodecs/WebCodecsEncodedAudioChunk.idl
+    Modules/webcodecs/WebCodecsEncodedAudioChunkType.idl
     Modules/webcodecs/WebCodecsEncodedVideoChunk.idl
     Modules/webcodecs/WebCodecsEncodedVideoChunkMetadata.idl
     Modules/webcodecs/WebCodecsEncodedVideoChunkOutputCallback.idl
@@ -756,8 +769,8 @@ set(WebCore_NON_SVG_IDL_FILES
     Modules/webcodecs/WebCodecsVideoEncoderConfig.idl
     Modules/webcodecs/WebCodecsVideoEncoderEncodeOptions.idl
     Modules/webcodecs/WebCodecsVideoEncoderSupport.idl
-    Modules/webcodecs/WebCodecsVideoFrameOutputCallback.idl
     Modules/webcodecs/WebCodecsVideoFrame.idl
+    Modules/webcodecs/WebCodecsVideoFrameOutputCallback.idl
 
     Modules/webdatabase/Database.idl
     Modules/webdatabase/DatabaseCallback.idl
@@ -775,6 +788,25 @@ set(WebCore_NON_SVG_IDL_FILES
 
     Modules/websockets/CloseEvent.idl
     Modules/websockets/WebSocket.idl
+
+    Modules/webtransport/WebTransport.idl
+    Modules/webtransport/WebTransportBidirectionalStream.idl
+    Modules/webtransport/WebTransportCloseInfo.idl
+    Modules/webtransport/WebTransportCongestionControl.idl
+    Modules/webtransport/WebTransportDatagramDuplexStream.idl
+    Modules/webtransport/WebTransportDatagramStats.idl
+    Modules/webtransport/WebTransportError.idl
+    Modules/webtransport/WebTransportErrorOptions.idl
+    Modules/webtransport/WebTransportErrorSource.idl
+    Modules/webtransport/WebTransportHash.idl
+    Modules/webtransport/WebTransportOptions.idl
+    Modules/webtransport/WebTransportReceiveStream.idl
+    Modules/webtransport/WebTransportReceiveStreamStats.idl
+    Modules/webtransport/WebTransportReliabilityMode.idl
+    Modules/webtransport/WebTransportSendStream.idl
+    Modules/webtransport/WebTransportSendStreamOptions.idl
+    Modules/webtransport/WebTransportSendStreamStats.idl
+    Modules/webtransport/WebTransportStats.idl
 
     accessibility/AccessibilityRole.idl
     accessibility/AriaAttributes.idl
@@ -843,6 +875,7 @@ set(WebCore_NON_SVG_IDL_FILES
     crypto/parameters/RsaKeyGenParams.idl
     crypto/parameters/RsaOaepParams.idl
     crypto/parameters/RsaPssParams.idl
+    crypto/parameters/X25519Params.idl
 
     css/CSSConditionRule.idl
     css/CSSContainerRule.idl
@@ -956,6 +989,7 @@ set(WebCore_NON_SVG_IDL_FILES
     dom/ClipboardEvent.idl
     dom/Comment.idl
     dom/CompositionEvent.idl
+    dom/ContentVisibilityAutoStateChangeEvent.idl
     dom/CustomElementRegistry.idl
     dom/CustomEvent.idl
     dom/DOMException.idl
@@ -1141,7 +1175,6 @@ set(WebCore_NON_SVG_IDL_FILES
     html/HTMLMediaElement+AudioOutput.idl
     html/HTMLMediaElement.idl
     html/HTMLMenuElement.idl
-    html/HTMLMenuItemElement.idl
     html/HTMLMetaElement.idl
     html/HTMLMeterElement.idl
     html/HTMLModElement.idl
@@ -1920,6 +1953,7 @@ list(APPEND WebCore_CSS_VALUE_KEYWORDS
 if (ENABLE_WEBGL)
     list(APPEND WebCore_SOURCES
         html/canvas/ANGLEInstancedArrays.cpp
+        html/canvas/EXTBlendFuncExtended.cpp
         html/canvas/EXTBlendMinMax.cpp
         html/canvas/EXTClipControl.cpp
         html/canvas/EXTColorBufferFloat.cpp
@@ -1998,6 +2032,7 @@ endif ()
 
 list(APPEND WebCore_IDL_FILES
     html/canvas/ANGLEInstancedArrays.idl
+    html/canvas/EXTBlendFuncExtended.idl
     html/canvas/EXTBlendMinMax.idl
     html/canvas/EXTClipControl.idl
     html/canvas/EXTColorBufferFloat.idl
@@ -2713,6 +2748,34 @@ list(APPEND WebCore_SOURCES ${WebCore_DERIVED_SOURCES_DIR}/Namespace.cpp)
 WEBKIT_COMPUTE_SOURCES(WebCore)
 
 target_precompile_headers(WebCore PRIVATE WebCorePrefix.h)
+
+list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+    Modules/WebGPU/InternalAPI/WebGPU.serialization.in
+
+    page/ActivityState.serialization.in
+    page/DragActions.serialization.in
+    page/LayoutMilestones.serialization.in
+    page/MediaProducer.serialization.in
+
+    platform/PlatformEvent.serialization.in
+    platform/PlatformScreen.serialization.in
+    platform/PlatformWheelEvent.serialization.in
+    platform/ScrollTypes.serialization.in
+
+    platform/audio/PlatformMediaSession.serialization.in
+
+    platform/cocoa/PlaybackSessionModel.serialization.in
+
+    platform/graphics/cocoa/MediaPlaybackTargetContext.serialization.in
+
+    platform/graphics/InbandTextTrackPrivate.serialization.in
+
+    platform/mediastream/MDNSRegisterError.serialization.in
+
+    platform/network/ProtectionSpaceBase.serialization.in
+
+    platform/network/soup/SoupNetworkProxySettings.serialization.in
+)
 
 WEBKIT_COPY_FILES(WebCore_CopyPrivateHeaders
     DESTINATION ${WebCore_PRIVATE_FRAMEWORK_HEADERS_DIR}/WebCore

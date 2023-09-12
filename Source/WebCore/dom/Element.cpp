@@ -769,17 +769,10 @@ Vector<String> Element::getAttributeNames() const
 
 bool Element::hasFocusableStyle() const
 {
-    if (renderer() && renderer()->isSkippedContent()) {
-        auto* candidate = this;
-        while ((candidate = candidate->parentElementInComposedTree())) {
-            if (candidate->renderer() && candidate->renderStyle()->contentVisibility() == ContentVisibility::Hidden)
-                return false;
-        }
-    }
-
     auto isFocusableStyle = [](const RenderStyle* style) {
         return style && style->display() != DisplayType::None && style->display() != DisplayType::Contents
-            && style->visibility() == Visibility::Visible && !style->effectiveInert();
+            && style->visibility() == Visibility::Visible && !style->effectiveInert()
+            && (style->skippedContentReason().value_or(ContentVisibility::Visible) != ContentVisibility::Hidden || style->contentVisibility() != ContentVisibility::Visible);
     };
 
     if (renderStyle())
@@ -1074,7 +1067,7 @@ static std::optional<std::pair<RenderElement*, LayoutRect>> listBoxElementScroll
 
 void Element::scrollIntoView(std::optional<std::variant<bool, ScrollIntoViewOptions>>&& arg)
 {
-    document().contentVisibilityDocumentState().updateContentRelevancyStatusForScrollIfNeeded(*this);
+    document().updateContentRelevancyForScrollIfNeeded(*this);
 
     document().updateLayoutIgnorePendingStylesheets();
 
@@ -1141,7 +1134,7 @@ void Element::scrollIntoView(bool alignToTop)
 
 void Element::scrollIntoViewIfNeeded(bool centerIfNeeded)
 {
-    document().contentVisibilityDocumentState().updateContentRelevancyStatusForScrollIfNeeded(*this);
+    document().updateContentRelevancyForScrollIfNeeded(*this);
 
     document().updateLayoutIgnorePendingStylesheets();
 
@@ -1249,7 +1242,7 @@ void Element::scrollByUnits(int units, ScrollGranularity granularity)
     if (!renderer->hasNonVisibleOverflow())
         return;
 
-    auto direction = units < 0 ? ScrollUp : ScrollDown;
+    auto direction = units < 0 ? ScrollDirection::ScrollUp : ScrollDirection::ScrollDown;
     auto* stopElement = this;
     downcast<RenderBox>(*renderer).scroll(direction, granularity, std::abs(units), &stopElement);
 }
@@ -3533,7 +3526,7 @@ void Element::focus(const FocusOptions& options)
         return;
     }
 
-    document->contentVisibilityDocumentState().updateContentRelevancyStatusForScrollIfNeeded(*this);
+    document->updateContentRelevancyForScrollIfNeeded(*this);
 
     RefPtr<Element> newTarget = this;
 
@@ -3875,7 +3868,7 @@ void Element::addToTopLayer()
     document().addTopLayerElement(*this);
     setNodeFlag(NodeFlag::IsInTopLayer);
 
-    document().scheduleContentRelevancyUpdate(ContentRelevancyStatus::IsInTopLayer);
+    document().scheduleContentRelevancyUpdate(ContentRelevancy::IsInTopLayer);
 
     // Invalidate inert state
     invalidateStyleInternal();
@@ -3909,7 +3902,7 @@ void Element::removeFromTopLayer()
     document().removeTopLayerElement(*this);
     clearNodeFlag(NodeFlag::IsInTopLayer);
 
-    document().scheduleContentRelevancyUpdate(ContentRelevancyStatus::IsInTopLayer);
+    document().scheduleContentRelevancyUpdate(ContentRelevancy::IsInTopLayer);
 
     // Invalidate inert state
     invalidateStyleInternal();
@@ -3972,6 +3965,8 @@ const RenderStyle* Element::resolveComputedStyle(ResolveComputedStyleMode mode)
 {
     ASSERT(isConnected());
 
+    document().styleScope().flushPendingUpdate();
+
     bool isInDisplayNoneTree = false;
 
     // Traverse the ancestor chain to find the rootmost element that has invalid computed style.
@@ -4000,17 +3995,18 @@ const RenderStyle* Element::resolveComputedStyle(ResolveComputedStyleMode mode)
             }
             if (mode == ResolveComputedStyleMode::RenderedOnly && existing->display() == DisplayType::None) {
                 isInDisplayNoneTree = true;
-                return nullptr;
+                // Invalid ancestor style may still affect this display:none style.
+                rootmost = nullptr;
             }
         }
         return rootmost;
     }();
 
-    if (isInDisplayNoneTree)
-        return nullptr;
-
-    if (!rootmostInvalidElement)
+    if (!rootmostInvalidElement) {
+        if (isInDisplayNoneTree)
+            return nullptr;
         return existingComputedStyle();
+    }
 
     auto* ancestorWithValidStyle = rootmostInvalidElement->parentElementInComposedTree();
 
@@ -4027,6 +4023,11 @@ const RenderStyle* Element::resolveComputedStyle(ResolveComputedStyleMode mode)
     // FIXME: This is not as efficient as it could be. For example if an ancestor has a non-inherited style change but
     // the styles are otherwise clean we would not need to re-resolve descendants.
     for (auto& element : makeReversedRange(elementsRequiringComputedStyle)) {
+        if (computedStyle && computedStyle->containerType() != ContainerType::Normal) {
+            // If we find a query container we need to bail out and do full style update to resolve it.
+            if (document().updateStyleIfNeeded())
+                return this->computedStyle();
+        };
         auto style = document().styleForElementIgnoringPendingStylesheets(*element, computedStyle);
         computedStyle = style.get();
         ElementRareData& rareData = element->ensureElementRareData();
@@ -5385,25 +5386,28 @@ bool Element::isPopoverShowing() const
 // https://drafts.csswg.org/css-contain/#relevant-to-the-user
 bool Element::isRelevantToUser() const
 {
-    return hasRareData() && elementRareData()->contentRelevancyStatus();
+    if (auto relevancy = contentRelevancy())
+        return !relevancy->isEmpty();
+    return false;
 }
 
-OptionSet<ContentRelevancyStatus> Element::contentRelevancyStatus() const
+std::optional<OptionSet<ContentRelevancy>> Element::contentRelevancy() const
 {
     if (!hasRareData())
-        return { };
-    return elementRareData()->contentRelevancyStatus();
+        return std::nullopt;
+    return elementRareData()->contentRelevancy();
 }
 
-void Element::setContentRelevancyStatus(OptionSet<ContentRelevancyStatus> contentRelvancyStatus)
+void Element::setContentRelevancy(OptionSet<ContentRelevancy> contentRelevancy)
 {
-    ensureElementRareData().setContentRelevancyStatus(contentRelvancyStatus);
+    ensureElementRareData().setContentRelevancy(contentRelevancy);
 }
 
-void Element::contentVisibilityViewportChange(bool)
+AtomString Element::makeTargetBlankIfHasDanglingMarkup(const AtomString& target)
 {
-    ASSERT(renderStyle() && renderStyle()->contentVisibility() == ContentVisibility::Auto);
-    document().scheduleContentRelevancyUpdate(ContentRelevancyStatus::OnScreen);
+    if ((target.contains('\n') || target.contains('\r') || target.contains('\t')) && target.contains('<'))
+        return "_blank"_s;
+    return target;
 }
 
 } // namespace WebCore

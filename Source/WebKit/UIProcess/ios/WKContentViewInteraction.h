@@ -135,6 +135,7 @@ class WebPageProxy;
 #endif
 
 @class UIPointerInteraction;
+@class UIPointerRegion;
 @class UITargetedPreview;
 @class _UILookupGestureRecognizer;
 @class _UIHighlightView;
@@ -335,8 +336,8 @@ struct ImageAnalysisContextMenuActionData {
 
 #if HAVE(UI_POINTER_INTERACTION)
     RetainPtr<UIPointerInteraction> _pointerInteraction;
-    BOOL _hasOutstandingPointerInteractionRequest;
-    std::optional<std::pair<WebKit::InteractionInformationRequest, BlockPtr<void(UIPointerRegion *)>>> _deferredPointerInteractionRequest;
+    RetainPtr<UIPointerRegion> _lastPointerRegion;
+    BOOL _pointerInteractionRegionNeedsUpdate;
 #endif
 
     RetainPtr<UIWKTextInteractionAssistant> _textInteractionAssistant;
@@ -411,6 +412,7 @@ struct ImageAnalysisContextMenuActionData {
     WebKit::WebAutocorrectionContext _lastAutocorrectionContext;
     WebKit::WKAutoCorrectionData _autocorrectionData;
     WebKit::InteractionInformationAtPosition _positionInformation;
+    std::optional<WebCore::TextIndicatorData> _positionInformationLinkIndicator;
     WebKit::FocusedElementInformation _focusedElementInformation;
     RetainPtr<NSObject<WKFormPeripheral>> _inputPeripheral;
     BlockPtr<void(::WebEvent *, BOOL)> _keyWebEventHandler;
@@ -829,6 +831,8 @@ FOR_EACH_PRIVATE_WKCONTENTVIEW_ACTION(DECLARE_WKCONTENTVIEW_ACTION_FOR_WEB_VIEW)
 
 - (void)beginTextRecognitionForVideoInElementFullscreen:(WebKit::ShareableBitmap::Handle&&)bitmapHandle bounds:(WebCore::FloatRect)bounds;
 - (void)cancelTextRecognitionForVideoInElementFullscreen;
+
+- (BOOL)_tryToHandlePressesEvent:(UIPressesEvent *)event;
 
 @end
 

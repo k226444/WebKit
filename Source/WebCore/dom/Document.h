@@ -267,7 +267,7 @@ enum class CollectionType : uint8_t;
 enum CSSPropertyID : uint16_t;
 
 enum class CompositeOperator : uint8_t;
-enum class ContentRelevancyStatus : uint8_t;
+enum class ContentRelevancy : uint8_t;
 enum class DOMAudioSessionType : uint8_t;
 enum class DisabledAdaptations : uint8_t;
 enum class FireEvents : bool;
@@ -829,9 +829,9 @@ public:
     void setTextColor(const Color& color) { m_textColor = color; }
     const Color& textColor() const { return m_textColor; }
 
-    const Color& linkColor() const { return m_linkColor; }
-    const Color& visitedLinkColor() const { return m_visitedLinkColor; }
-    const Color& activeLinkColor() const { return m_activeLinkColor; }
+    Color linkColor(const RenderStyle&) const;
+    Color visitedLinkColor(const RenderStyle&) const;
+    Color activeLinkColor(const RenderStyle&) const;
     void setLinkColor(const Color& c) { m_linkColor = c; }
     void setVisitedLinkColor(const Color& c) { m_visitedLinkColor = c; }
     void setActiveLinkColor(const Color& c) { m_activeLinkColor = c; }
@@ -1530,6 +1530,7 @@ public:
     void removeIntersectionObserver(IntersectionObserver&);
     unsigned numberOfIntersectionObservers() const { return m_intersectionObservers.size(); }
     void updateIntersectionObservations();
+    void updateIntersectionObservations(const Vector<WeakPtr<IntersectionObserver>>&);
     void scheduleInitialIntersectionObservationUpdate();
     IntersectionObserverData& ensureIntersectionObserverData();
     IntersectionObserverData* intersectionObserverDataIfExists() { return m_intersectionObserverData.get(); }
@@ -1782,7 +1783,8 @@ public:
     bool isNavigationBlockedByThirdPartyIFrameRedirectBlocking(LocalFrame& targetFrame, const URL& destinationURL);
 
     void updateRelevancyOfContentVisibilityElements();
-    void scheduleContentRelevancyUpdate(ContentRelevancyStatus);
+    void scheduleContentRelevancyUpdate(ContentRelevancy);
+    void updateContentRelevancyForScrollIfNeeded(const Element& scrollAnchor);
 
 protected:
     enum class ConstructionFlag : uint8_t {
@@ -2298,7 +2300,7 @@ private:
     DOMAudioSessionType m_audioSessionType { };
 #endif
 
-    OptionSet<ContentRelevancyStatus> m_contentRelevancyStatusUpdate;
+    OptionSet<ContentRelevancy> m_contentRelevancyUpdate;
 
     StandaloneStatus m_xmlStandalone { StandaloneStatus::Unspecified };
     bool m_hasXMLDeclaration { false };

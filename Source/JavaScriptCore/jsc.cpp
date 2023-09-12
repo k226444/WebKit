@@ -65,6 +65,7 @@
 #include "JSWebAssemblyMemory.h"
 #include "LLIntThunks.h"
 #include "LinkBuffer.h"
+#include "NativeCallee.h"
 #include "ObjectConstructor.h"
 #include "ParserError.h"
 #include "ProfilerDatabase.h"
@@ -1183,13 +1184,12 @@ private:
     }
 
     ShellSourceProvider(const String& source, const SourceOrigin& sourceOrigin, String&& sourceURL, const TextPosition& startPosition, SourceProviderSourceType sourceType)
-        : StringSourceProvider(source, sourceOrigin, WTFMove(sourceURL), startPosition, sourceType)
+        : StringSourceProvider(source, sourceOrigin, SourceTaintedOrigin::Untainted, WTFMove(sourceURL), startPosition, sourceType)
         // Workers started via $.agent.start are not shut down in a synchronous manner, and it
         // is possible the main thread terminates the process while a worker is writing its
         // bytecode cache, which results in intermittent test failures. As $.agent.start is only
         // a rarely used testing facility, we simply do not cache bytecode on these threads.
         , m_cacheEnabled(Worker::current().isMain() && !!Options::diskCachePath())
-
     {
     }
 
@@ -1293,7 +1293,7 @@ JSInternalPromise* GlobalObject::moduleLoaderFetch(JSGlobalObject* globalObject,
 #endif
 
     if (attributes && attributes->type() == ScriptFetchParameters::Type::JSON) {
-        auto source = SourceCode(StringSourceProvider::create(stringFromUTF(buffer), SourceOrigin { moduleURL }, WTFMove(moduleKey), TextPosition(), SourceProviderSourceType::JSON));
+        auto source = SourceCode(StringSourceProvider::create(stringFromUTF(buffer), SourceOrigin { moduleURL }, WTFMove(moduleKey), SourceTaintedOrigin::Untainted, TextPosition(), SourceProviderSourceType::JSON));
         auto sourceCode = JSSourceCode::create(vm, WTFMove(source));
         scope.release();
         promise->resolve(globalObject, sourceCode);
@@ -1696,7 +1696,10 @@ JSC_DEFINE_HOST_FUNCTION(functionRunString, (JSGlobalObject* globalObject, CallF
     realm->putDirect(vm, Identifier::fromString(vm, "arguments"_s), array);
 
     NakedPtr<Exception> exception;
-    evaluate(realm, jscSource(source, callFrame->callerSourceOrigin(vm)), JSValue(), exception);
+    {
+        SourceCode code = jscSource(source, callFrame->callerSourceOrigin(vm), String(), TextPosition(), SourceProviderSourceType::Program);
+        evaluate(realm, code, JSValue(), exception);
+    }
 
     if (exception) {
         if (vm.isTerminationException(exception.get()))
@@ -2066,16 +2069,16 @@ JSC_DEFINE_HOST_FUNCTION(functionCallerIsBBQOrOMGCompiled, (JSGlobalObject* glob
 
     CallerFunctor wasmToJSFrame;
     StackVisitor::visit(callFrame, vm, wasmToJSFrame);
-    if (!wasmToJSFrame.callerFrame() || !wasmToJSFrame.callerFrame()->isWasmFrame())
+    if (!wasmToJSFrame.callerFrame() || !wasmToJSFrame.callerFrame()->isNativeCalleeFrame() || wasmToJSFrame.callerFrame()->callee().asNativeCallee()->category() != NativeCallee::Category::Wasm)
         return throwVMError(globalObject, scope, "caller is not a wasm->js import function"_s);
 
     // We have a wrapper frame that we generate for imports. If we ever can direct call from wasm we would need to change this.
-    ASSERT(wasmToJSFrame.callerFrame()->callee().isWasm());
+    ASSERT(wasmToJSFrame.callerFrame()->callee().isNativeCallee());
     CallerFunctor wasmFrame;
     StackVisitor::visit(wasmToJSFrame.callerFrame(), vm, wasmFrame);
-    ASSERT(wasmFrame.callerFrame()->callee().isWasm());
+    ASSERT(wasmFrame.callerFrame()->callee().isNativeCallee());
 #if ENABLE(WEBASSEMBLY)
-    auto mode = wasmFrame.callerFrame()->callee().asWasmCallee()->compilationMode();
+    auto mode = static_cast<Wasm::Callee*>(wasmFrame.callerFrame()->callee().asNativeCallee())->compilationMode();
     return JSValue::encode(jsBoolean(isAnyBBQ(mode) || isAnyOMG(mode)));
 #endif
     RELEASE_ASSERT_NOT_REACHED();
@@ -3648,8 +3651,7 @@ void CommandLine::parseArguments(int argc, char** argv)
     }
 
     int i = 1;
-    JSC::Options::DumpLevel dumpOptionsLevel = JSC::Options::DumpLevel::None;
-    bool needToExit = false;
+    bool optionsDumpRequested = false;
 
     bool hasBadJSCOptions = false;
     for (; i < argc; ++i) {
@@ -3725,12 +3727,12 @@ void CommandLine::parseArguments(int argc, char** argv)
             printUsageStatement(true);
 
         if (!strcmp(arg, "--options")) {
-            dumpOptionsLevel = JSC::Options::DumpLevel::Verbose;
-            needToExit = true;
+            JSC::Options::dumpOptions() = static_cast<unsigned>(JSC::Options::DumpLevel::Verbose);
+            optionsDumpRequested = true;
             continue;
         }
         if (!strcmp(arg, "--dumpOptions")) {
-            dumpOptionsLevel = JSC::Options::DumpLevel::Overridden;
+            JSC::Options::dumpOptions() = static_cast<unsigned>(JSC::Options::DumpLevel::Overridden);
             continue;
         }
         if (!strcmp(arg, "--sample")) {
@@ -3835,15 +3837,11 @@ void CommandLine::parseArguments(int argc, char** argv)
     for (; i < argc; ++i)
         m_arguments.append(String::fromLatin1(argv[i]));
 
-    if (dumpOptionsLevel != JSC::Options::DumpLevel::None) {
-        const char* optionsTitle = (dumpOptionsLevel == JSC::Options::DumpLevel::Overridden)
-            ? "Modified JSC runtime options:"
-            : "All JSC runtime options:";
-        JSC::Options::dumpAllOptions(dumpOptionsLevel, optionsTitle);
-    }
     JSC::Options::assertOptionsAreCoherent();
-    if (needToExit)
+    if (optionsDumpRequested) {
+        JSC::Options::executeDumpOptions();
         jscExit(EXIT_SUCCESS);
+    }
 }
 
 CommandLine::CommandLine(CommandLineForWorkersTag)

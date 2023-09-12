@@ -184,7 +184,7 @@ void LocalFrameViewLayoutContext::performLayout()
     LayoutScope layoutScope(*this);
     TraceScope tracingScope(PerformLayoutStart, PerformLayoutEnd);
     ScriptDisallowedScope::InMainThread scriptDisallowedScope;
-    InspectorInstrumentation::willLayout(downcast<LocalFrame>(view().frame()));
+    InspectorInstrumentation::willLayout(view().frame());
     WeakPtr<RenderElement> layoutRoot;
     
     m_layoutTimer.stop();
@@ -240,7 +240,7 @@ void LocalFrameViewLayoutContext::performLayout()
 #endif
         clearSubtreeLayoutRoot();
 
-#if !LOG_DISABLED
+#if !LOG_DISABLED && ENABLE(TREE_DEBUGGING)
         auto layoutLogEnabled = [] {
             return LogLayout.state == WTFLogChannelState::On;
         };
@@ -269,8 +269,8 @@ void LocalFrameViewLayoutContext::performLayout()
         view().didLayout(layoutRoot);
         runOrScheduleAsynchronousTasks();
     }
-    InspectorInstrumentation::didLayout(downcast<LocalFrame>(view().frame()), *layoutRoot);
-    DebugPageOverlays::didLayout(downcast<LocalFrame>(view().frame()));
+    InspectorInstrumentation::didLayout(view().frame(), *layoutRoot);
+    DebugPageOverlays::didLayout(view().frame());
 }
 
 void LocalFrameViewLayoutContext::runOrScheduleAsynchronousTasks()
@@ -583,14 +583,6 @@ void LocalFrameViewLayoutContext::pushLayoutState(RenderElement& root)
     m_layoutStateStack.append(makeUnique<RenderLayoutState>(root));
 }
 
-bool LocalFrameViewLayoutContext::pushLayoutStateForPaginationIfNeeded(RenderBlockFlow& layoutRoot)
-{
-    if (layoutState())
-        return false;
-    m_layoutStateStack.append(makeUnique<RenderLayoutState>(layoutRoot, RenderLayoutState::IsPaginated::Yes));
-    return true;
-}
-    
 bool LocalFrameViewLayoutContext::pushLayoutState(RenderBox& renderer, const LayoutSize& offset, LayoutUnit pageHeight, bool pageHeightChanged)
 {
     // We push LayoutState even if layoutState is disabled because it stores layoutDelta too.
@@ -627,6 +619,17 @@ void LocalFrameViewLayoutContext::popLayoutState()
     }
 }
 
+void LocalFrameViewLayoutContext::setBoxNeedsTransformUpdateAfterContainerLayout(RenderBox& box, RenderBlock& container)
+{
+    auto it = m_containersWithDescendantsNeedingTransformUpdate.ensure(container, [] { return Vector<WeakPtr<RenderBox>>({ }); });
+    it.iterator->value.append(WeakPtr { box });
+}
+
+Vector<WeakPtr<RenderBox>> LocalFrameViewLayoutContext::takeBoxesNeedingTransformUpdateAfterContainerLayout(RenderBlock& container)
+{
+    return m_containersWithDescendantsNeedingTransformUpdate.take(container);
+}
+
 #ifndef NDEBUG
 void LocalFrameViewLayoutContext::checkLayoutState()
 {
@@ -637,7 +640,7 @@ void LocalFrameViewLayoutContext::checkLayoutState()
 
 LocalFrame& LocalFrameViewLayoutContext::frame() const
 {
-    return downcast<LocalFrame>(view().frame());
+    return view().frame();
 }
 
 LocalFrameView& LocalFrameViewLayoutContext::view() const

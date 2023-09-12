@@ -35,6 +35,7 @@ namespace WebCore {
 namespace Layout {
 
 class InlineContentBreaker;
+struct CandidateTextContent;
 struct TextOnlyLineBreakResult;
 
 class TextOnlySimpleLineBuilder : public AbstractLineBuilder {
@@ -43,16 +44,18 @@ public:
     LineLayoutResult layoutInlineContent(const LineInput&, const std::optional<PreviousLine>&) final;
 
     static bool isEligibleForSimplifiedTextOnlyInlineLayout(const ElementBox& root, const InlineFormattingState&, const FloatingState* = nullptr);
-    static bool hasIntrinsicWidthSpecificStyle(const RenderStyle& rootStyle);
 
 private:
     InlineItemPosition placeInlineTextContent(const InlineItemRange&);
     InlineItemPosition placeNonWrappingInlineTextContent(const InlineItemRange&);
-    TextOnlyLineBreakResult handleInlineTextContent(const InlineContentBreaker::ContinuousContent&, const InlineItemRange&);
+    TextOnlyLineBreakResult handleOverflowingTextContent(const InlineContentBreaker::ContinuousContent&, const InlineItemRange&);
+    TextOnlyLineBreakResult commitCandidateContent(const CandidateTextContent&, const InlineItemRange&);
     void initialize(const InlineItemRange&, const InlineRect& initialLogicalRect, const std::optional<PreviousLine>&);
     void handleLineEnding(InlineItemPosition, size_t layoutRangeEndIndex);
     size_t revertToTrailingItem(const InlineItemRange&, const InlineTextItem&);
     size_t revertToLastNonOverflowingItem(const InlineItemRange&);
+    InlineLayoutUnit availableWidth() const;
+    bool isWrappingAllowed() const { return m_isWrappingAllowed; }
 
     bool isFirstFormattedLine() const { return !m_previousLine.has_value(); }
 
@@ -70,6 +73,9 @@ private:
     InlineRect m_lineLogicalRect;
     const InlineItems& m_inlineItems;
     Vector<const InlineTextItem*> m_wrapOpportunityList;
+    bool m_isWrappingAllowed { false };
+    InlineLayoutUnit m_trimmedTrailingWhitespaceWidth { 0.f };
+    std::optional<InlineLayoutUnit> m_overflowContentLogicalWidth { };
 
     std::optional<InlineTextItem> m_partialLeadingTextItem;
 };
