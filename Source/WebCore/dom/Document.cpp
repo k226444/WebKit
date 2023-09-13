@@ -2361,7 +2361,7 @@ std::unique_ptr<RenderStyle> Document::styleForElementIgnoringPendingStylesheets
     ASSERT(Style::postResolutionCallbacksAreSuspended());
 
     std::optional<RenderStyle> updatedDocumentStyle;
-    if (!parentStyle && m_needsFullStyleRebuild) {
+    if (!parentStyle && m_needsFullStyleRebuild && hasLivingRenderTree()) {
         updatedDocumentStyle.emplace(Style::resolveForDocument(*this));
         parentStyle = &*updatedDocumentStyle;
     }
@@ -9508,6 +9508,14 @@ NotificationClient* Document::notificationClient()
 #else
     return nullptr;
 #endif
+}
+
+GraphicsClient* Document::graphicsClient()
+{
+    auto* page = this->page();
+    if (!page)
+        return nullptr;
+    return &page->chrome();
 }
 
 std::optional<PAL::SessionID> Document::sessionID() const

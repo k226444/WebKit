@@ -98,8 +98,8 @@ static void printReason(AvoidanceReason reason, TextStream& stream)
     case AvoidanceReason::ContentIsRuby:
         stream << "ruby";
         break;
-    case AvoidanceReason::FlowHasNonSupportedChild:
-        stream << "unsupported child renderer";
+    case AvoidanceReason::FlowIsInitialContainingBlock:
+        stream << "flow is ICB";
         break;
     case AvoidanceReason::FlowHasLineAlignEdges:
         stream << "-webkit-line-align edges";
@@ -112,9 +112,6 @@ static void printReason(AvoidanceReason reason, TextStream& stream)
         break;
     case AvoidanceReason::MultiColumnFlowHasFloatingOrOutOfFlowChild:
         stream << "column with floating/out-of-flow boxes";
-        break;
-    case AvoidanceReason::ChildBoxIsFloatingOrPositioned:
-        stream << "child box is floating or positioned";
         break;
     case AvoidanceReason::ContentIsSVG:
         stream << "SVG content";
@@ -304,26 +301,17 @@ static OptionSet<AvoidanceReason> canUseForChild(const RenderBlockFlow& flow, co
         SET_REASON_AND_RETURN_IF_NEEDED(ContentIsRuby, reasons, includeReasons);
 #endif
 
-    if (is<RenderBlockFlow>(renderer) || is<RenderGrid>(renderer) || is<RenderFlexibleBox>(renderer) || is<RenderDeprecatedFlexibleBox>(renderer) || is<RenderReplaced>(renderer) || is<RenderListItem>(renderer) || is<RenderTable>(renderer)
+    if (is<RenderBlockFlow>(renderer)
+        || is<RenderGrid>(renderer)
+        || is<RenderFlexibleBox>(renderer)
+        || is<RenderDeprecatedFlexibleBox>(renderer)
+        || is<RenderReplaced>(renderer)
+        || is<RenderListItem>(renderer)
+        || is<RenderTable>(renderer)
 #if ENABLE(MATHML)
         || is<RenderMathMLBlock>(renderer)
 #endif
-        ) {
-        auto isSupportedFloatingOrPositioned = [&] (auto& renderer) {
-            if (renderer.isOutOfFlowPositioned()) {
-                if (!renderer.parent()->style().isLeftToRightDirection() || renderer.parent()->style().unicodeBidi() != UnicodeBidi::Normal)
-                    return false;
-                if (is<RenderLayerModelObject>(renderer.parent()) && downcast<RenderLayerModelObject>(*renderer.parent()).shouldPlaceVerticalScrollbarOnLeft())
-                    return false;
-            }
-            return true;
-        };
-        if (!isSupportedFloatingOrPositioned(renderer))
-            SET_REASON_AND_RETURN_IF_NEEDED(ChildBoxIsFloatingOrPositioned, reasons, includeReasons)
-        return reasons;
-    }
-
-    if (is<RenderListMarker>(renderer))
+        || is<RenderListMarker>(renderer))
         return reasons;
 
     if (is<RenderInline>(renderer)) {
@@ -336,7 +324,7 @@ static OptionSet<AvoidanceReason> canUseForChild(const RenderBlockFlow& flow, co
         return reasons;
     }
 
-    SET_REASON_AND_RETURN_IF_NEEDED(FlowHasNonSupportedChild, reasons, includeReasons);
+    ASSERT_NOT_REACHED();
     return reasons;
 }
 
@@ -354,7 +342,7 @@ OptionSet<AvoidanceReason> canUseForLineLayoutWithReason(const RenderBlockFlow& 
     if (!DeprecatedGlobalSettings::inlineFormattingContextIntegrationEnabled())
         SET_REASON_AND_RETURN_IF_NEEDED(FeatureIsDisabled, reasons, includeReasons);
     if (flow.isRenderView())
-        SET_REASON_AND_RETURN_IF_NEEDED(FlowHasNonSupportedChild, reasons, includeReasons);
+        SET_REASON_AND_RETURN_IF_NEEDED(FlowIsInitialContainingBlock, reasons, includeReasons);
     if (!flow.firstChild()) {
         // Non-SVG code does not call into layoutInlineChildren with no children anymore.
         ASSERT(is<RenderSVGBlock>(flow));

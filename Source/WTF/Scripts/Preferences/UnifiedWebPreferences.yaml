@@ -794,7 +794,8 @@ BeaconAPIEnabled:
 
 BlobRegistryTopOriginPartitioningEnabled:
   type: bool
-  status: unstable
+  status: preview
+  category: security
   humanReadableName: "Partition Blob URL Registry"
   humanReadableDescription: "Partition Blob URL Registry by Top-Level Origin"
   defaultValue:
@@ -902,6 +903,20 @@ CSS3DTransformInteroperabilityEnabled:
       default: true
     WebCore:
       default: true
+
+CSSBasedRubyEnabled:
+  type: bool
+  status: unstable
+  category: css
+  humanReadableName: "CSS based Ruby implementation in IFC"
+  humanReadableDescription: "CSS based Ruby implementation in IFC"
+  defaultValue:
+    WebKitLegacy:
+      default: false
+    WebKit:
+      default: false
+    WebCore:
+      default: false
 
 CSSCascadeLayersEnabled:
   type: bool
